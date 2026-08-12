@@ -189,6 +189,22 @@ Push these into the App Service's application settings the same way as step 7
 connection credentials instead of failing at startup with
 `ValueError: No service connection configuration provided.`
 
+**Also push `AUTH_HANDLER_NAME=AGENTIC`** in this same step (it is already the
+default in `infra/main.bicep`, but re-applying app settings from a `.env` file
+can overwrite it if that name is not included). Without it,
+`host_agent_server.py`'s `self.auth_handler_name` stays `None`, so the agent
+never attempts the OBO user-token exchange, and `_exchange_user_token()`
+silently degrades every turn to Foundry IQ + Web IQ only, logging just
+`" No auth handler configured — Fabric IQ/Work IQ will be unavailable this
+turn"` (a WARNING, not an error, easy to miss). This is a distinct root cause
+from the earlier "Cancelled via cancel scope" RBAC bug — that one broke
+Foundry IQ outright; this one silently disables Fabric IQ/Work IQ while
+Foundry IQ and Web IQ keep working, which is why the agent still returns a
+plausible, well-cited answer that just quietly omits two of the four IQ
+surfaces. Verify the fix by checking Application Insights `traces` for
+`"🔐 Using auth handler: AGENTIC"` at startup and the absence of the "No auth
+handler configured" warning on subsequent turns.
+
 ## 9b. Publish the Teams app package (manual, one-time, requires Global/Teams Admin)
 
 `a365 publish --aiteammate` (already run) produces

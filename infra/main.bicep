@@ -157,6 +157,14 @@ module agentHost 'core/host/appservice.bicep' = {
       APPLICATIONINSIGHTS_CONNECTION_STRING: aiProject.outputs.APPLICATIONINSIGHTS_CONNECTION_STRING
       AZURE_TENANT_ID: tenant().tenantId
       FABRIC_TENANT_ID: tenant().tenantId
+      // Must match the handler name used in the
+      // AGENTAPPLICATION__USERAUTHORIZATION__HANDLERS__<name>__SETTINGS__*
+      // settings written by `a365 setup all` (see docs/DEPLOYMENT.md step 9).
+      // Without this, host_agent_server.py never passes an auth_handler_name
+      // to the agent, _exchange_user_token() silently returns None, and
+      // Fabric IQ / Work IQ are skipped for every turn (Foundry IQ + Web IQ
+      // only) -- this exact gap was root-caused and fixed in this repo.
+      AUTH_HANDLER_NAME: 'AGENTIC'
     }
   }
 }
