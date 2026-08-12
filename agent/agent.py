@@ -23,11 +23,13 @@ into the agent's default tool set for that one `agent.run()` call, rather than
 held open for the lifetime of the process.
 """
 
+import asyncio
 import json
 import logging
 import os
 import time
 from collections.abc import Generator
+from contextlib import AsyncExitStack
 from typing import Optional
 
 import httpx
@@ -84,6 +86,11 @@ WORKIQ_TOOLBOX_NAME = os.getenv("CUSTOM_FOUNDRY_WORKIQ_TOOLBOX_NAME", "work-iq-t
 
 # OBO token scope used to call Fabric IQ / Work IQ through the Foundry project.
 FOUNDRY_USER_TOKEN_SCOPES = os.getenv("FOUNDRY_USER_TOKEN_SCOPES", "https://ai.azure.com/.default")
+
+# ponytail: bound to a few seconds so one slow/hanging IQ tool (observed with
+# Work IQ toolbox) degrades that tool gracefully instead of the whole turn
+# hitting the mcp/anyio library's misleading "Cancelled via cancel scope" error.
+TOOL_CONNECT_TIMEOUT_SECONDS = float(os.getenv("TOOL_CONNECT_TIMEOUT_SECONDS", "15"))
 
 NOC_AGENT_INSTRUCTIONS = """You are the NOC/NOA network operations assistant for a telecom
 provider. You help on-call engineers triage incidents such as fibre cuts, router failures,
@@ -353,6 +360,37 @@ class NocAgent(AgentInterface):
     # MESSAGE PROCESSING
     # -------------------------------------------------------------------
 
+    async def _connect_tools(self, tools: list) -> tuple[list, AsyncExitStack]:
+        """Pre-connect each tool with a bounded timeout, in isolation.
+
+        agent_framework's _prepare_run_context connects any not-yet-connected
+        MCP tool with `enter_async_context()` right before the turn runs. If
+        one tool hangs (observed live with the Work IQ toolbox -- Foundry IQ,
+        Web IQ, and Fabric IQ connect fine, but the 4th tool's initialize()
+        never completes), that hang surfaces as a misleading "Cancelled via
+        cancel scope ..." anyio error that kills the *entire* turn, taking
+        down the 3 healthy tools with it. Connecting each tool ourselves
+        first, with a timeout, drops only the bad tool for this turn --
+        connecting it here sets `tool.is_connected = True`, so the library's
+        own connect loop just skips it.
+        """
+        stack = AsyncExitStack()
+        healthy: list = []
+        for tool in tools:
+            try:
+                await asyncio.wait_for(
+                    stack.enter_async_context(tool), timeout=TOOL_CONNECT_TIMEOUT_SECONDS
+                )
+                healthy.append(tool)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "⚠️ Tool '%s' failed to connect within %.0fs, skipping for this turn: %s",
+                    getattr(tool, "name", tool),
+                    TOOL_CONNECT_TIMEOUT_SECONDS,
+                    exc,
+                )
+        return healthy, stack
+
     async def process_user_message(
         self,
         message: str,
@@ -377,8 +415,9 @@ class NocAgent(AgentInterface):
         # safety net for any other transient MCP-init hiccup.
         for attempt in range(2):
             turn_tools, turn_clients = self._build_turn_tools(user_token)
+            connected_tools, tool_stack = await self._connect_tools(turn_tools)
             try:
-                response = await self._agent.run(history, tools=turn_tools)
+                response = await self._agent.run(history, tools=connected_tools)
                 self._conversations[user_id] = history + [Message("assistant", [response.text])]
                 return response.text or "I processed your request but couldn't generate a response."
             except McpError as exc:
@@ -395,6 +434,7 @@ class NocAgent(AgentInterface):
                 self._conversations.pop(user_id, None)
                 return f"Sorry, I encountered an error: {exc}"
             finally:
+                await tool_stack.aclose()
                 for client in turn_clients:
                     await client.aclose()
         return "Sorry, I encountered a repeated error and could not complete this request."
