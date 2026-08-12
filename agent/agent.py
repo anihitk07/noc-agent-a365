@@ -220,10 +220,6 @@ class NocAgent(AgentInterface):
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
         self._service_credential = _get_service_credential()
-        self._foundry_iq_http_client: Optional[httpx.AsyncClient] = None
-        self._web_iq_http_client: Optional[httpx.AsyncClient] = None
-        self._foundry_iq_tool: Optional[MCPStreamableHTTPTool] = None
-        self._web_iq_tool: Optional[MCPStreamableHTTPTool] = None
         self._chat_client: Optional[FoundryChatClient] = None
         self._agent: Optional[Agent] = None
         # Per-user conversation history for context continuity across turns.
@@ -234,42 +230,15 @@ class NocAgent(AgentInterface):
     # -------------------------------------------------------------------
 
     async def initialize(self) -> None:
-        """Build the shared (non-user-scoped) tools and the MAF agent."""
+        """Build the MAF agent shell. All MCP tools are built fresh per turn
+        (see _build_turn_tools) -- Teams can redeliver a message concurrently
+        (slow-ack retry), and a shared, connect-once MCP tool instance entered/
+        exited by two overlapping agent.run() calls hits an anyio cross-task
+        cancel-scope error ("MCP server failed to initialize: Cancelled via
+        cancel scope ..."). Building every tool fresh per turn, like Fabric IQ
+        and Work IQ already did, avoids the whole bug class.
+        """
         logger.info("🔌 Initializing NOC agent against %s", PROJECT_ENDPOINT)
-
-        service_token = self._service_credential.get_token(SEARCH_SCOPE).token
-        self._foundry_iq_http_client = httpx.AsyncClient(
-            auth=_BearerTokenAuth(service_token), timeout=120.0
-        )
-        knowledge_base_endpoint = (
-            f"{SEARCH_ENDPOINT.rstrip('/')}/knowledgebases/{KNOWLEDGE_BASE_NAME}"
-            "/mcp?api-version=2026-05-01-preview"
-        )
-        self._foundry_iq_tool = MCPStreamableHTTPTool(
-            name="knowledge-base",
-            url=knowledge_base_endpoint,
-            http_client=self._foundry_iq_http_client,
-            allowed_tools=["knowledge_base_retrieve"],
-            load_prompts=False,
-        )
-        logger.info("✅ Foundry IQ tool wired: %s", knowledge_base_endpoint)
-
-        default_tools: list = [self._foundry_iq_tool]
-
-        if WEB_IQ_API_KEY:
-            self._web_iq_http_client = httpx.AsyncClient(
-                headers={"x-apikey": WEB_IQ_API_KEY}, timeout=60.0
-            )
-            self._web_iq_tool = MCPStreamableHTTPTool(
-                name="web-search",
-                url=WEB_IQ_MCP_ENDPOINT,
-                http_client=self._web_iq_http_client,
-                load_prompts=False,
-            )
-            default_tools.append(self._web_iq_tool)
-            logger.info("✅ Web IQ tool wired: %s", WEB_IQ_MCP_ENDPOINT)
-        else:
-            logger.warning("⚠️ WEB_IQ_API_KEY not set — Web IQ tool disabled")
 
         self._chat_client = FoundryChatClient(
             project_endpoint=PROJECT_ENDPOINT,
@@ -280,35 +249,74 @@ class NocAgent(AgentInterface):
             client=self._chat_client,
             name="NocAgent",
             instructions=NOC_AGENT_INSTRUCTIONS,
-            tools=default_tools,
             default_options={"store": False},
         )
-        logger.info("✅ NOC agent ready (%d default tools)", len(default_tools))
+        logger.info("✅ NOC agent ready")
 
     async def cleanup(self) -> None:
-        """Close any open HTTP clients."""
-        for client in (self._foundry_iq_http_client, self._web_iq_http_client):
-            if client is not None:
-                await client.aclose()
+        """No persistent HTTP clients to close -- all tool clients are per-turn."""
         logger.info("🧹 Agent cleanup completed")
 
     # -------------------------------------------------------------------
-    # PER-TURN, USER-SCOPED (OBO) TOOLS -- Fabric IQ + Work IQ
+    # PER-TURN TOOLS -- Foundry IQ, Web IQ, Fabric IQ, Work IQ
     # -------------------------------------------------------------------
 
-    def _build_obo_tools(self, user_token: Optional[str]) -> tuple[list, list[httpx.AsyncClient]]:
-        """Build Fabric IQ + Work IQ tools scoped to one user's OBO token for one turn.
+    def _build_turn_tools(self, user_token: Optional[str]) -> tuple[list, list[httpx.AsyncClient]]:
+        """Build all four IQ tools fresh for one turn.
 
         Returns (tools, http_clients_to_close) -- the caller must close the
         clients after the run() call completes, since MCPStreamableHTTPTool
         needs its auth attached at construction/session-init time, not applied
         later via a header_provider.
-        """
-        if not user_token:
-            return [], []
 
+        All tools are built per-turn (not cached on self) because MAF's Agent
+        connects each MCP tool via its own per-run() async exit stack; a tool
+        instance shared across concurrent turns (Teams can redeliver a message
+        while the first is still processing) gets entered/exited by two
+        different tasks at once, which anyio surfaces as "Cancelled via cancel
+        scope ...". Fabric IQ and Work IQ already used this per-turn pattern
+        for OBO-token reasons; Foundry IQ and Web IQ now follow it too.
+        """
         tools: list = []
         clients: list[httpx.AsyncClient] = []
+
+        service_token = self._service_credential.get_token(SEARCH_SCOPE).token
+        foundry_iq_http_client = httpx.AsyncClient(
+            auth=_BearerTokenAuth(service_token), timeout=120.0
+        )
+        clients.append(foundry_iq_http_client)
+        knowledge_base_endpoint = (
+            f"{SEARCH_ENDPOINT.rstrip('/')}/knowledgebases/{KNOWLEDGE_BASE_NAME}"
+            "/mcp?api-version=2026-05-01-preview"
+        )
+        tools.append(
+            MCPStreamableHTTPTool(
+                name="knowledge-base",
+                url=knowledge_base_endpoint,
+                http_client=foundry_iq_http_client,
+                allowed_tools=["knowledge_base_retrieve"],
+                load_prompts=False,
+            )
+        )
+
+        if WEB_IQ_API_KEY:
+            web_iq_http_client = httpx.AsyncClient(
+                headers={"x-apikey": WEB_IQ_API_KEY}, timeout=60.0
+            )
+            clients.append(web_iq_http_client)
+            tools.append(
+                MCPStreamableHTTPTool(
+                    name="web-search",
+                    url=WEB_IQ_MCP_ENDPOINT,
+                    http_client=web_iq_http_client,
+                    load_prompts=False,
+                )
+            )
+        else:
+            logger.warning("⚠️ WEB_IQ_API_KEY not set — Web IQ tool disabled this turn")
+
+        if not user_token:
+            return tools, clients
 
         if FABRIC_DATA_AGENT_MCP_URL:
             # NB: Fabric routes MCP requests through a redirect layer -- the
@@ -362,16 +370,15 @@ class NocAgent(AgentInterface):
         history: list[Message] = self._conversations.get(user_id, [])
         history.append(Message("user", [message]))
 
-        # ponytail: agent_framework's MCP session init occasionally raises a
-        # spurious anyio "Cancelled via cancel scope ..." error on the first
-        # connect attempt for a per-turn OBO tool (its own code notes genuine
-        # vs. spurious task cancellation can't always be distinguished). One
-        # clean retry with freshly rebuilt tools/clients resolves it; if it
-        # fails twice, it's a real problem and we surface it.
+        # ponytail: real root cause of the "Cancelled via cancel scope ..."
+        # bug was two Teams-redelivered messages racing on the SAME shared,
+        # connect-once Foundry IQ/Web IQ tool instances (fixed by making all
+        # 4 tools per-turn in _build_turn_tools). This retry is a leftover
+        # safety net for any other transient MCP-init hiccup.
         for attempt in range(2):
-            obo_tools, obo_clients = self._build_obo_tools(user_token)
+            turn_tools, turn_clients = self._build_turn_tools(user_token)
             try:
-                response = await self._agent.run(history, tools=obo_tools)
+                response = await self._agent.run(history, tools=turn_tools)
                 self._conversations[user_id] = history + [Message("assistant", [response.text])]
                 return response.text or "I processed your request but couldn't generate a response."
             except McpError as exc:
@@ -388,7 +395,7 @@ class NocAgent(AgentInterface):
                 self._conversations.pop(user_id, None)
                 return f"Sorry, I encountered an error: {exc}"
             finally:
-                for client in obo_clients:
+                for client in turn_clients:
                     await client.aclose()
         return "Sorry, I encountered a repeated error and could not complete this request."
 

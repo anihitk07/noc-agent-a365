@@ -83,26 +83,31 @@ fidelity as long as the system instructions tell the model which tool answers
 which class of question (see the `NOC_AGENT_INSTRUCTIONS` prompt in
 `agent/agent.py`).
 
-## Per-turn OBO tool rebuild (the "genuine engineering delta")
+## Per-turn tool rebuild (the "genuine engineering delta")
 
 `MCPStreamableHTTPTool` and `FoundryToolbox` both need their auth attached at
 construction time (a `httpx.Auth` on the `httpx.AsyncClient`, or a
-`TokenCredential`), not applied later. Because Fabric IQ and Work IQ must be
-scoped to *the Teams user currently chatting*, `agent.py` cannot build them
-once at process start like Foundry IQ / Web IQ. Instead, on every turn:
+`TokenCredential`), not applied later. Fabric IQ and Work IQ must also be
+scoped to *the Teams user currently chatting*, so `agent.py` cannot build
+them once at process start. **All four tools are rebuilt fresh every turn**
+(not just the OBO ones) — a shared, connect-once MCP tool instance can be
+entered/exited concurrently by two overlapping `agent.run()` calls (e.g. Teams
+redelivering a slow-to-ack message), which anyio surfaces as `"Cancelled via
+cancel scope ..."`; per-turn tools avoid that whole bug class. On every turn:
 
 1. `NocAgent._exchange_user_token()` calls the A365 `AgenticUserAuthorization`
    handler (`auth.exchange_token(...)`) to get the caller's OBO token.
-2. `NocAgent._build_obo_tools()` wraps that token in a fixed-token
-   `httpx.Auth` (Fabric IQ) and a `TokenCredential` shim (`FoundryToolbox` /
-   Work IQ), builds fresh tool objects, and returns them.
-3. `agent.run(history, tools=obo_tools)` merges them with the agent's default
-   (Foundry IQ + Web IQ) tools for that single call.
+2. `NocAgent._build_turn_tools()` builds fresh Foundry IQ + Web IQ tools (service
+   credential / static API key), and — if a user token is available — fresh
+   Fabric IQ + Work IQ tools wrapped in a fixed-token `httpx.Auth` (Fabric IQ)
+   and a `TokenCredential` shim (`FoundryToolbox` / Work IQ).
+3. `agent.run(history, tools=turn_tools)` runs the turn with all four tools.
 4. The per-turn `httpx.AsyncClient`s are closed in a `finally` block after the
    call completes.
 
 This keeps the shared MAF `Agent` instance stateless with respect to identity
-— no risk of one user's Fabric/Work IQ session leaking into another's turn.
+and connection lifecycle — no risk of one user's Fabric/Work IQ session
+leaking into another's turn, and no shared MCP session to race on.
 
 ## Infrastructure (`infra/`)
 
