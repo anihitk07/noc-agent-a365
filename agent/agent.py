@@ -268,7 +268,9 @@ class NocAgent(AgentInterface):
     # PER-TURN TOOLS -- Foundry IQ, Web IQ, Fabric IQ, Work IQ
     # -------------------------------------------------------------------
 
-    def _build_turn_tools(self, user_token: Optional[str]) -> tuple[list, list[httpx.AsyncClient]]:
+    def _build_turn_tools(
+        self, foundry_user_token: Optional[str], fabric_user_token: Optional[str]
+    ) -> tuple[list, list[httpx.AsyncClient]]:
         """Build all four IQ tools fresh for one turn.
 
         Returns (tools, http_clients_to_close) -- the caller must close the
@@ -283,6 +285,13 @@ class NocAgent(AgentInterface):
         different tasks at once, which anyio surfaces as "Cancelled via cancel
         scope ...". Fabric IQ and Work IQ already used this per-turn pattern
         for OBO-token reasons; Foundry IQ and Web IQ now follow it too.
+
+        Fabric IQ and Work IQ need SEPARATE OBO tokens: Work IQ lives under
+        the Foundry project (ai.azure.com audience), Fabric IQ's Data Agent
+        lives under api.fabric.microsoft.com -- a different token audience
+        entirely. Sending one resource's token to the other's endpoint fails
+        auth, which the mcp/anyio client mis-surfaces as the same misleading
+        "Cancelled via cancel scope ..." error (see docs/TROUBLESHOOTING.md).
         """
         tools: list = []
         clients: list[httpx.AsyncClient] = []
@@ -322,15 +331,12 @@ class NocAgent(AgentInterface):
         else:
             logger.warning("⚠️ WEB_IQ_API_KEY not set — Web IQ tool disabled this turn")
 
-        if not user_token:
-            return tools, clients
-
-        if FABRIC_DATA_AGENT_MCP_URL:
+        if fabric_user_token and FABRIC_DATA_AGENT_MCP_URL:
             # NB: Fabric routes MCP requests through a redirect layer -- the
             # client MUST set follow_redirects=True or every call fails with a
             # misleading 500 Internal Server Error.
             fabric_http_client = httpx.AsyncClient(
-                auth=_BearerTokenAuth(user_token), timeout=120.0, follow_redirects=True
+                auth=_BearerTokenAuth(fabric_user_token), timeout=120.0, follow_redirects=True
             )
             clients.append(fabric_http_client)
             tools.append(
@@ -341,13 +347,16 @@ class NocAgent(AgentInterface):
                     load_prompts=False,
                 )
             )
-        else:
+        elif not FABRIC_DATA_AGENT_MCP_URL:
             logger.warning("⚠️ FABRIC_DATA_AGENT_MCP_URL not set — Fabric IQ tool disabled this turn")
+
+        if not foundry_user_token:
+            return tools, clients
 
         toolbox_endpoint = f"{PROJECT_ENDPOINT.rstrip('/')}/toolboxes/{WORKIQ_TOOLBOX_NAME}/mcp?api-version=v1"
         tools.append(
             FoundryToolbox(
-                credential=_StaticTokenCredential(user_token),
+                credential=_StaticTokenCredential(foundry_user_token),
                 url=toolbox_endpoint,
                 name="work_iq_toolbox",
                 load_prompts=False,
@@ -404,7 +413,12 @@ class NocAgent(AgentInterface):
         display_name = getattr(from_prop, "name", None) or "unknown"
         logger.info("📨 Message from %s (%s): %s...", display_name, user_id, message[:80])
 
-        user_token = await self._exchange_user_token(auth, auth_handler_name, context)
+        foundry_user_token = await self._exchange_user_token(
+            auth, auth_handler_name, context, FOUNDRY_USER_TOKEN_SCOPES
+        )
+        fabric_user_token = await self._exchange_user_token(
+            auth, auth_handler_name, context, FABRIC_SCOPE
+        )
         history: list[Message] = self._conversations.get(user_id, [])
         history.append(Message("user", [message]))
 
@@ -414,7 +428,7 @@ class NocAgent(AgentInterface):
         # 4 tools per-turn in _build_turn_tools). This retry is a leftover
         # safety net for any other transient MCP-init hiccup.
         for attempt in range(2):
-            turn_tools, turn_clients = self._build_turn_tools(user_token)
+            turn_tools, turn_clients = self._build_turn_tools(foundry_user_token, fabric_user_token)
             connected_tools, tool_stack = await self._connect_tools(turn_tools)
             try:
                 response = await self._agent.run(history, tools=connected_tools)
@@ -482,7 +496,11 @@ class NocAgent(AgentInterface):
     # -------------------------------------------------------------------
 
     async def _exchange_user_token(
-        self, auth: Authorization, auth_handler_name: Optional[str], context: TurnContext
+        self,
+        auth: Authorization,
+        auth_handler_name: Optional[str],
+        context: TurnContext,
+        scope: str,
     ) -> Optional[str]:
         """Get a user-delegated token via the AgenticUserAuthorization handler.
 
@@ -490,15 +508,21 @@ class NocAgent(AgentInterface):
         blueprint) provides user-delegated tokens through this exchange. This
         token allows Fabric Data Agent and Work IQ to act on behalf of the
         Teams user rather than a service identity.
+
+        `scope` must match the AUDIENCE of the resource being called (Work IQ
+        lives under the Foundry project -> ai.azure.com; Fabric IQ's Data
+        Agent lives under api.fabric.microsoft.com) -- an access token minted
+        for one audience is rejected by the other, and that rejection is
+        mis-surfaced by the mcp/anyio client as "Cancelled via cancel scope
+        ...", not a clean 401 (see docs/TROUBLESHOOTING.md).
         """
-        scopes = [s.strip() for s in FOUNDRY_USER_TOKEN_SCOPES.split(",") if s.strip()]
         if not auth_handler_name:
             logger.warning("⚠️ No auth handler configured — Fabric IQ/Work IQ will be unavailable this turn")
             return None
 
         try:
             token_response = await auth.exchange_token(
-                context, scopes=scopes, auth_handler_id=auth_handler_name
+                context, scopes=[scope], auth_handler_id=auth_handler_name
             )
             if token_response and token_response.token:
                 logger.info("✅ User OBO token acquired (len=%d)", len(token_response.token))
