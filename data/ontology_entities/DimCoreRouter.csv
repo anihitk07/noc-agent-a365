@@ -1,0 +1,4 @@
+RouterId,City,Region,Vendor,Model,FirmwareVersion,Latitude,Longitude
+CORE-SYD-01,Sydney,NSW,Cisco,ASR-9922,IOS-XR-7.9.2,-33.8688,151.2093
+CORE-MEL-01,Melbourne,VIC,Cisco,ASR-9922,IOS-XR-7.9.2,-37.8136,144.9631
+CORE-BNE-01,Brisbane,QLD,Juniper,MX10008,JUNOS-23.4R1,-27.4698,153.0251

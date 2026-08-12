@@ -1,0 +1,36 @@
+Incident: INC-2026-01-20-0016
+Title: Optical power dip on LINK-SYD-BNE-FIBRE-01 - self-recovered
+Severity: P3
+Root Cause: LINK-SYD-BNE-FIBRE-01
+Root Cause Type: TRANSIENT_OPTICAL_EVENT
+Telemetry Signature:
+  SENS-SYD-BNE-F1-OPT-002 (Coffs Harbour, 530km): -11.4 dBm → -19.8 dBm → -11.3 dBm (dip and recovery over 3 min)
+  LINK-SYD-BNE-FIBRE-01 BER: 2.4e-12 → 8.1e-9 → 2.3e-12 (transient error burst)
+  LINK-SYD-BNE-FIBRE-01 Utilization: 41% (stable throughout — no traffic loss)
+  SENS-SYD-BNE-F1-OPT-001 (Newcastle, 160km): -10.6 dBm (STABLE — fault downstream)
+  SENS-SYD-BNE-F1-OPT-003 (Brisbane, 920km): -12.0 dBm → -18.1 dBm → -11.9 dBm (correlated dip)
+Created: 2026-01-20T11:22:00Z
+Resolved: 2026-01-20T11:25:00Z
+SLA Breached: No
+
+Description:
+Transient optical power dip on LINK-SYD-BNE-FIBRE-01 detected at the Coffs Harbour monitoring point. Power dropped 8.4 dBm for approximately 3 minutes then self-recovered to nominal levels. BER spiked briefly but remained below error-free threshold. No traffic was lost. Suspected cause: thermal expansion event on aerial fibre section or transient connector micro-bend.
+
+Detection Method:
+Anomaly detection on optical power time-series (rate-of-change threshold)
+
+Resolution:
+Self-recovered — no operator intervention. Event logged for trend analysis. Field inspection scheduled for next patrol cycle to check aerial section near Coffs Harbour for physical stress indicators.
+
+Customer Impact:
+None
+
+Services Affected: 0
+Alerts Generated: 4
+Alerts Suppressed: 1
+Time to Detect: 15 seconds
+Time to Reroute: N/A
+Time to Resolve: 3 minutes
+
+Lessons Learned:
+Transient optical dips that self-recover within 5 minutes should be logged but not escalated. Pattern: upstream sensor stable + downstream sensors dip simultaneously indicates a localized event between the two monitoring points. Distinct from fibre cuts which show permanent loss of light.

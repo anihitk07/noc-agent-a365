@@ -1,0 +1,36 @@
+Incident: INC-2025-10-05-0041
+Title: BGP flap on external peering at Brisbane IX
+Severity: P3
+Root Cause: CORE-BNE-01
+Root Cause Type: EXTERNAL_PEERING_FLAP
+Telemetry Signature:
+  CORE-BNE-01 eBGP session to AS64512 (Brisbane IX): 3 flaps in 10 minutes
+  CORE-BNE-01 CPU: 18% → 34% (minor reconvergence load)
+  CORE-BNE-01 prefixes from AS64512: 2,450 → 0 → 2,450 (session bounce)
+  All optical sensors on BNE corridors: NORMAL (no physical layer impact)
+  CORE-BNE-01 iBGP sessions: all stable
+Created: 2025-10-05T19:08:00Z
+Resolved: 2025-10-05T19:22:00Z
+SLA Breached: No
+
+Description:
+External BGP peering session with AS64512 at Brisbane Internet Exchange flapped 3 times in 10 minutes. Root cause was a misconfigured hold timer on the remote peer's side. No customer-facing impact as alternate transit paths absorbed traffic during flaps.
+
+Detection Method:
+BGP session state change alerting
+
+Resolution:
+Remote peer contacted via IX mailing list. They corrected their BGP hold timer configuration. Session stabilized within 14 minutes of first flap.
+
+Customer Impact:
+None
+
+Services Affected: 0
+Alerts Generated: 6
+Alerts Suppressed: 3
+Time to Detect: 30 seconds
+Time to Reroute: N/A
+Time to Resolve: 14 minutes
+
+Lessons Learned:
+External peering flaps from IX peers are common and typically self-resolve or require remote-side fixes. Implement BGP dampening on IX peering sessions to suppress repeated flaps from unstable peers.

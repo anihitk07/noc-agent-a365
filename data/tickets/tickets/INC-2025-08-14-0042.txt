@@ -1,0 +1,38 @@
+Incident: INC-2025-08-14-0042
+Title: Fibre cut SYD-MEL corridor - contractor damage
+Severity: P1
+Root Cause: LINK-SYD-MEL-FIBRE-01
+Root Cause Type: FIBRE_CUT
+Telemetry Signature:
+  SENS-SYD-MEL-F1-OPT-001 (Campbelltown, 45km): -10.3 dBm → -10.4 dBm (STABLE — fault downstream)
+  SENS-SYD-MEL-F1-OPT-002 (Goulburn, 195km): -11.0 dBm → -30.6 dBm (LOSS OF LIGHT at 03:22:18)
+  SENS-SYD-MEL-F1-OPT-003 (near Albury, 460km): -10.9 dBm → -31.2 dBm (LOSS OF LIGHT at 03:22:18)
+  LINK-SYD-MEL-FIBRE-01 BER: 1.9e-12 → 1.0 (total errors)
+  LINK-SYD-MEL-FIBRE-02 Utilization: 38% → 92% (failover absorption)
+Created: 2025-08-14T03:22:15Z
+Resolved: 2025-08-14T09:22:15Z
+SLA Breached: No
+
+Description:
+Third-party contractor struck fibre conduit during road works on Hume Highway. Complete loss of light on LINK-SYD-MEL-FIBRE-01. 1,847 downstream alerts generated.
+
+Detection Method:
+Automated alert storm detection
+
+Resolution:
+Traffic rerouted to LINK-SYD-MEL-FIBRE-02 within 45 seconds. Physical repair completed in 6 hours by field team.
+
+Customer Impact:
+- VPN-ACME-CORP
+- VPN-BIGBANK
+- BB-BUNDLE-SYD-NORTH
+
+Services Affected: 3
+Alerts Generated: 1847
+Alerts Suppressed: 1846
+Time to Detect: 8 seconds
+Time to Reroute: 45 seconds
+Time to Resolve: 360 minutes
+
+Lessons Learned:
+Alternate path FIBRE-02 had sufficient capacity (38% utilisation). Consider pre-provisioned automatic failover for enterprise VPN customers.

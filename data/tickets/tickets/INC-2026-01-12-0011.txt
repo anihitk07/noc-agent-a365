@@ -1,0 +1,34 @@
+Incident: INC-2026-01-12-0011
+Title: GNB-SYD-2043 antenna alignment - routine maintenance
+Severity: P4
+Root Cause: GNB-SYD-2043
+Root Cause Type: PLANNED_MAINTENANCE
+Telemetry Signature:
+  GNB-SYD-2043 RSRP: -82 dBm → -95 dBm → -79 dBm (brief dip during realignment)
+  GNB-SYD-2043 connected UEs: 145 → 12 → 158 (handover to adjacent cells during work)
+  GNB-SYD-2043 backhaul link: UP throughout (no transport impact)
+Created: 2026-01-12T02:30:00Z
+Resolved: 2026-01-12T04:00:00Z
+SLA Breached: No
+
+Description:
+Routine antenna alignment on base station GNB-SYD-2043 to correct 2-degree azimuth drift detected during quarterly RF audit. Work performed during low-traffic window (02:30-04:00). Connected UEs handed over to adjacent cells GNB-SYD-2041 and GNB-SYD-2042 during realignment.
+
+Detection Method:
+Change management system — planned event (CHG-2026-0009)
+
+Resolution:
+Antenna realigned to spec. Post-alignment RSRP improved by 3 dBm vs. pre-drift baseline. UEs reattached within 10 minutes of completion.
+
+Customer Impact:
+None
+
+Services Affected: 0
+Alerts Generated: 1
+Alerts Suppressed: 1
+Time to Detect: 0 seconds
+Time to Reroute: N/A
+Time to Resolve: 90 minutes
+
+Lessons Learned:
+Quarterly RF audits catch minor azimuth drift before it causes coverage complaints. Adjacent cell capacity must be verified before scheduling antenna work to ensure smooth UE handover.

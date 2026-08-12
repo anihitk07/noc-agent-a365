@@ -1,0 +1,35 @@
+Incident: INC-2025-08-01-0008
+Title: CPU spike on CORE-BNE-01 during BGP table full rebuild
+Severity: P3
+Root Cause: CORE-BNE-01
+Root Cause Type: BGP_RECONVERGENCE
+Telemetry Signature:
+  CORE-BNE-01 CPU: 24% → 94% → 31% (spike duration: 7 minutes during full table rebuild)
+  CORE-BNE-01 BGP prefixes received: 1,047,221 (full table re-learned from upstream AS)
+  CORE-BNE-01 memory utilization: 62% → 78% (RIB rebuild)
+  All optical sensors on BNE corridors: NORMAL (no physical layer impact)
+Created: 2025-08-01T04:12:00Z
+Resolved: 2025-08-01T04:19:00Z
+SLA Breached: No
+
+Description:
+Upstream transit provider performed BGP session reset during their maintenance window. CORE-BNE-01 received full routing table re-advertisement (1M+ prefixes), causing a 7-minute CPU spike to 94%. No traffic loss — forwarding plane remained operational throughout.
+
+Detection Method:
+Threshold-based alerting on CPU utilization (>90% for >60 seconds)
+
+Resolution:
+Self-resolved once BGP table rebuild completed. No operator intervention required. Upstream provider notified to schedule graceful restart next time.
+
+Customer Impact:
+None
+
+Services Affected: 0
+Alerts Generated: 3
+Alerts Suppressed: 0
+Time to Detect: 65 seconds
+Time to Reroute: N/A
+Time to Resolve: 7 minutes
+
+Lessons Learned:
+BGP full table rebuilds from upstream peers can spike CPU to near-100% but do not affect the forwarding plane on this platform. Tune CPU alert threshold to suppress short-duration spikes during known maintenance windows.

@@ -1,0 +1,36 @@
+Incident: INC-2025-12-12-0019
+Title: BB-BUNDLE-SYD-NORTH slow speeds during evening peak
+Severity: P3
+Root Cause: AGG-SYD-NORTH-01
+Root Cause Type: CONGESTION
+Telemetry Signature:
+  AGG-SYD-NORTH-01 uplink utilization: 72% → 96% (evening peak 19:00-22:00)
+  BB-BUNDLE-SYD-NORTH average throughput: 85 Mbps → 31 Mbps (degraded)
+  AGG-SYD-NORTH-01 QoS drops (BE class): 0 → 3,800 packets/sec
+  All optical sensors: NORMAL (no physical layer fault)
+  LINK-SYD-MEL-FIBRE-01, FIBRE-02: stable, BER nominal
+Created: 2025-12-12T19:15:00Z
+Resolved: 2025-12-12T22:45:00Z
+SLA Breached: No
+
+Description:
+Multiple customer complaints regarding slow broadband speeds on BB-BUNDLE-SYD-NORTH during evening peak hours. Root cause was aggregation switch uplink congestion at AGG-SYD-NORTH-01. No transport or fibre fault — purely a local capacity issue at the access layer.
+
+Detection Method:
+Customer-reported complaints correlated with utilization threshold alerts
+
+Resolution:
+Self-resolved when peak traffic subsided at 22:00. Capacity augmentation (additional 10G uplink) approved and scheduled for next maintenance window.
+
+Customer Impact:
+- BB-BUNDLE-SYD-NORTH
+
+Services Affected: 1
+Alerts Generated: 8
+Alerts Suppressed: 2
+Time to Detect: 600 seconds
+Time to Reroute: N/A
+Time to Resolve: 210 minutes
+
+Lessons Learned:
+Evening peak congestion on residential aggregation links is a recurring capacity issue, not a fault condition. Proactive capacity monitoring with trend-based forecasting would flag this before customer complaints arrive.

@@ -1,0 +1,38 @@
+# =============================================================================
+# Agent host runtime dependencies (mirrors pyproject.toml [project].dependencies)
+# =============================================================================
+
+# Microsoft Agent Framework (MAF) -- in-process agent, all 4 IQ tools as MAF tools
+agent-framework-core>=1.10.0
+agent-framework-foundry>=1.10.0
+agent-framework-foundry-hosting>=1.0.0a260630
+mcp>=1.28.1,<2
+
+# Microsoft Agents SDK — A365 hosting layer
+microsoft-agents-hosting-aiohttp==1.1.0
+microsoft-agents-hosting-core==1.1.0
+microsoft-agents-authentication-msal==1.1.0
+microsoft-agents-activity==1.1.0
+
+# Microsoft Agent 365 SDK packages
+microsoft-agents-a365-tooling==1.0.0
+microsoft-agents-a365-tooling-extensions-agentframework==1.0.0
+microsoft-agents-a365-observability-core==1.0.0
+microsoft-agents-a365-observability-extensions-agent-framework==1.0.0
+microsoft-agents-a365-runtime==1.0.0
+microsoft-agents-a365-notifications==1.0.0
+
+# Azure SDK / auth
+azure-identity>=1.25.3
+httpx>=0.28.1
+PyJWT>=2.8.0
+
+# Observability (Azure Monitor tracing)
+azure-monitor-opentelemetry>=1.8.7
+opentelemetry-api>=1.25.0
+opentelemetry-sdk>=1.25.0
+
+# Core
+python-dotenv>=1.0.0
+aiohttp>=3.9.0
+requests>=2.31.0

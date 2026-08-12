@@ -1,0 +1,5 @@
+LinkId,ConduitId,SegmentDescription
+LINK-SYD-MEL-FIBRE-01,CONDUIT-SYD-MEL-INLAND,Primary SYD-MEL fibre routed through inland conduit via Goulburn
+LINK-SYD-MEL-FIBRE-02,CONDUIT-SYD-MEL-INLAND,Backup SYD-MEL fibre routed through SAME inland conduit — shared risk
+LINK-SYD-BNE-FIBRE-01,CONDUIT-SYD-BNE-PACIFIC,SYD-BNE fibre routed through Pacific Highway coastal conduit
+LINK-MEL-BNE-FIBRE-01,CONDUIT-SYD-MEL-COASTAL,MEL-BNE fibre routed through coastal conduit (partial overlap)

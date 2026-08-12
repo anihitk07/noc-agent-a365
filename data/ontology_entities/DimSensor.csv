@@ -1,0 +1,17 @@
+SensorId,SensorType,MonitoredEntityId,MonitoredEntityType,MountLocation,Latitude,Longitude,InstalledDate,Status
+SENS-SYD-MEL-F1-OPT-001,OpticalPower,LINK-SYD-MEL-FIBRE-01,TransportLink,Splice point — 45km south of Sydney CBD near Campbelltown,-34.0650,150.8140,2018-06-15,ACTIVE
+SENS-SYD-MEL-F1-OPT-002,OpticalPower,LINK-SYD-MEL-FIBRE-01,TransportLink,Splice point — Goulburn interchange (near AMP-SYD-MEL-GOULBURN),-34.7546,149.7186,2018-06-15,ACTIVE
+SENS-SYD-MEL-F1-OPT-003,OpticalPower,LINK-SYD-MEL-FIBRE-01,TransportLink,Splice point — 15km north of Albury (near AMP-SYD-MEL-ALBURY),-36.0237,146.9120,2018-06-15,ACTIVE
+SENS-SYD-MEL-F1-BER-001,BitErrorRate,LINK-SYD-MEL-FIBRE-01,TransportLink,Head-end transceiver bay — CORE-SYD-01 rack B3,-33.8688,151.2093,2018-06-15,ACTIVE
+SENS-SYD-MEL-F1-BER-002,BitErrorRate,LINK-SYD-MEL-FIBRE-01,TransportLink,Tail-end transceiver bay — CORE-MEL-01 rack A7,-37.8136,144.9631,2018-06-15,ACTIVE
+SENS-SYD-MEL-F2-OPT-001,OpticalPower,LINK-SYD-MEL-FIBRE-02,TransportLink,Splice point — 45km south of Sydney CBD near Campbelltown,-34.0650,150.8140,2020-03-10,ACTIVE
+SENS-SYD-MEL-F2-OPT-002,OpticalPower,LINK-SYD-MEL-FIBRE-02,TransportLink,Splice point — Goulburn interchange (shared conduit with FIBRE-01),-34.7546,149.7186,2020-03-10,ACTIVE
+SENS-SYD-BNE-F1-OPT-001,OpticalPower,LINK-SYD-BNE-FIBRE-01,TransportLink,Splice point — 80km north of Sydney near Gosford,-33.4250,151.3420,2019-04-20,ACTIVE
+SENS-SYD-BNE-F1-OPT-002,OpticalPower,LINK-SYD-BNE-FIBRE-01,TransportLink,Splice point — near AMP-SYD-BNE-COFFS (Coffs Harbour),-30.2963,153.1157,2019-04-20,ACTIVE
+SENS-MEL-BNE-F1-OPT-001,OpticalPower,LINK-MEL-BNE-FIBRE-01,TransportLink,Splice point — 120km east of Melbourne near Sale,-38.1000,147.0680,2020-03-10,ACTIVE
+SENS-MEL-BNE-F1-OPT-002,OpticalPower,LINK-MEL-BNE-FIBRE-01,TransportLink,Splice point — near AMP-MEL-BNE-GRAFTON (Grafton),-29.6900,152.9330,2020-03-10,ACTIVE
+SENS-CORE-SYD-01-TEMP-001,Temperature,CORE-SYD-01,CoreRouter,Main chassis — exhaust vent sensor,-33.8688,151.2093,2019-01-10,ACTIVE
+SENS-CORE-SYD-01-CPU-001,CPULoad,CORE-SYD-01,CoreRouter,Control plane module,-33.8688,151.2093,2019-01-10,ACTIVE
+SENS-CORE-MEL-01-TEMP-001,Temperature,CORE-MEL-01,CoreRouter,Main chassis — exhaust vent sensor,-37.8136,144.9631,2019-01-10,ACTIVE
+SENS-CORE-MEL-01-CPU-001,CPULoad,CORE-MEL-01,CoreRouter,Control plane module,-37.8136,144.9631,2019-01-10,ACTIVE
+SENS-CORE-BNE-01-TEMP-001,Temperature,CORE-BNE-01,CoreRouter,Main chassis — exhaust vent sensor,-27.4698,153.0251,2019-01-10,ACTIVE

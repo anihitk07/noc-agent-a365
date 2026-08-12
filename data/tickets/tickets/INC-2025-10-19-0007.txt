@@ -1,0 +1,35 @@
+Incident: INC-2025-10-19-0007
+Title: BGP misconfiguration - route leak SYD-BNE
+Severity: P2
+Root Cause: CORE-BNE-01
+Root Cause Type: MISCONFIGURATION
+Telemetry Signature:
+  CORE-BNE-01 CPU: 22% → 67% (BGP reconvergence load)
+  CORE-BNE-01 BGP prefixes advertised: 1,240 → 12,847 (route leak — internal prefixes exported)
+  CORE-BNE-01 BGP sessions: 4 stable, 0 flapping
+  All optical sensors on SYD-BNE corridor: NORMAL (no physical layer impact)
+Created: 2025-10-19T22:15:00Z
+Resolved: 2025-10-19T22:29:00Z
+SLA Breached: No
+
+Description:
+Incorrect route-map applied during maintenance window caused BNE router to advertise internal prefixes to external peers. Traffic blackholed for 12 minutes.
+
+Detection Method:
+Route withdrawal anomaly detection
+
+Resolution:
+Route-map corrected, BGP sessions cleared. Traffic restored within 2 minutes of fix.
+
+Customer Impact:
+(None)
+
+Services Affected: 0
+Alerts Generated: 156
+Alerts Suppressed: 155
+Time to Detect: 180 seconds
+Time to Reroute: 0 seconds
+Time to Resolve: 14 minutes
+
+Lessons Learned:
+Mandatory pre-change peer review for BGP route-map modifications. Implement automated config validation before commit.

@@ -1,0 +1,34 @@
+Incident: INC-2025-12-03-0012
+Title: Base station backhaul degradation GNB-MEL-3011
+Severity: P3
+Root Cause: GNB-MEL-3011
+Root Cause Type: HARDWARE_DEGRADATION
+Telemetry Signature:
+  GNB-MEL-3011 Ethernet CRC errors: 2/hr → 847/hr (gradual increase over 72 hours)
+  GNB-MEL-3011 PacketLossPct: 0.01% → 2.3%
+  GNB-MEL-3011 optical Rx power: -8.2 dBm (STABLE — SFP transmit issue, not fibre)
+Created: 2025-12-03T09:30:00Z
+Resolved: 2025-12-06T09:30:00Z
+SLA Breached: No
+
+Description:
+Ethernet interface on GNB-MEL-3011 showing increasing CRC errors. Packet loss reached 2.3% causing voice quality degradation for mobile users.
+
+Detection Method:
+Threshold-based alerting on PacketLossPct
+
+Resolution:
+SFP module replaced during next maintenance window. No emergency action required.
+
+Customer Impact:
+- MOB-5G-MEL-3011
+
+Services Affected: 1
+Alerts Generated: 12
+Alerts Suppressed: 0
+Time to Detect: 300 seconds
+Time to Reroute: 0 seconds
+Time to Resolve: 4320 minutes
+
+Lessons Learned:
+Gradual hardware degradation is harder to detect than binary failures. Consider trend-based anomaly detection on interface error counters.

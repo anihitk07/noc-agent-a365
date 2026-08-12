@@ -1,0 +1,6 @@
+AdvisoryId,RouterId,MatchReason
+ADV-CISCO-2025-001,CORE-SYD-01,Router runs IOS-XR-7.9.2 which matches affected version IOS-XR-7.9.2
+ADV-CISCO-2025-001,CORE-MEL-01,Router runs IOS-XR-7.9.2 which matches affected version IOS-XR-7.9.2
+ADV-CISCO-2025-002,CORE-SYD-01,Router runs IOS-XR-7.9.2 which matches affected version IOS-XR-7.9.2
+ADV-CISCO-2025-002,CORE-MEL-01,Router runs IOS-XR-7.9.2 which matches affected version IOS-XR-7.9.2
+ADV-JUNIPER-2025-001,CORE-BNE-01,Router runs JUNOS-23.4R1 which matches affected version JUNOS-23.4R1

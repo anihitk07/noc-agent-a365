@@ -1,0 +1,36 @@
+Incident: INC-2025-12-20-0027
+Title: Power brownout at Melbourne data center - generator cut-in
+Severity: P2
+Root Cause: CORE-MEL-01
+Root Cause Type: POWER_BROWNOUT
+Telemetry Signature:
+  CORE-MEL-01 power input: 230V → 198V → 230V (brownout lasted 4.2 seconds)
+  CORE-MEL-01 UPS: engaged at 198V, battery discharge for 4.2s
+  Generator GEN-MEL-DC-01: started at T+2.1s, on-load at T+4.2s (successful cut-in)
+  CORE-MEL-01 uptime: uninterrupted (no reboot)
+  All optical sensors on MEL corridors: NORMAL throughout
+Created: 2025-12-20T03:14:00Z
+Resolved: 2025-12-20T03:22:00Z
+SLA Breached: No
+
+Description:
+Mains power brownout at Melbourne primary data center. Voltage dropped to 198V for 4.2 seconds. UPS engaged immediately, generator cut in successfully at T+4.2 seconds. CORE-MEL-01 and all collocated equipment maintained uninterrupted operation. No customer impact.
+
+Detection Method:
+Power monitoring system — voltage threshold alert (<210V)
+
+Resolution:
+Generator ran for 45 minutes until mains power stabilized. UPS batteries recharged. Root cause was a grid-side fault reported by the utility provider.
+
+Customer Impact:
+None
+
+Services Affected: 0
+Alerts Generated: 5
+Alerts Suppressed: 2
+Time to Detect: 2 seconds
+Time to Reroute: N/A
+Time to Resolve: 8 minutes
+
+Lessons Learned:
+Generator cut-in performed within design parameters. UPS bridge time (4.2s) was within the 10-second battery capacity. Monthly generator load tests should continue. Consider adding utility grid voltage trending to predict brownout risk.

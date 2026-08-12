@@ -1,0 +1,35 @@
+Incident: INC-2025-09-28-0035
+Title: DWDM wavelength re-provisioning on SYD-MEL link (FIBRE-02)
+Severity: P4
+Root Cause: LINK-SYD-MEL-FIBRE-02
+Root Cause Type: PLANNED_MAINTENANCE
+Telemetry Signature:
+  LINK-SYD-MEL-FIBRE-02 optical power Ch.34 (λ=1550.12nm): -9.8 dBm → offline → -9.7 dBm (planned cycle)
+  LINK-SYD-MEL-FIBRE-02 optical power Ch.35 (λ=1550.92nm): provisioned at -9.9 dBm (new wavelength)
+  LINK-SYD-MEL-FIBRE-01 Utilization: 55% (stable — carrying rerouted traffic)
+  All SENS-SYD-MEL sensors: NORMAL throughout maintenance window
+Created: 2025-09-28T01:00:00Z
+Resolved: 2025-09-28T04:30:00Z
+SLA Breached: No
+
+Description:
+Planned DWDM wavelength re-provisioning on LINK-SYD-MEL-FIBRE-02 to add capacity channel. Traffic pre-rerouted to FIBRE-01 during 3.5-hour maintenance window. Optical power readings cycled on the affected channel as expected during tuning.
+
+Detection Method:
+Change management system — planned event (CHG-2025-0412)
+
+Resolution:
+New wavelength channel provisioned and verified. All optical power levels within specification. Traffic restored to dual-path operation.
+
+Customer Impact:
+None
+
+Services Affected: 0
+Alerts Generated: 4
+Alerts Suppressed: 4
+Time to Detect: 0 seconds
+Time to Reroute: 0 seconds
+Time to Resolve: 210 minutes
+
+Lessons Learned:
+DWDM reprovisioning on live systems benefits from pre-staged traffic rerouting. Optical power fluctuations during wavelength tuning are expected and should not trigger false alarms — suppress alerts during change windows.

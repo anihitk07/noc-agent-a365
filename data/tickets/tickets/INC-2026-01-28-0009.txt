@@ -1,0 +1,35 @@
+Incident: INC-2026-01-28-0009
+Title: DNS resolution failure impacting VPN-ACME-CORP
+Severity: P2
+Root Cause: VPN-ACME-CORP
+Root Cause Type: SERVICE_MISCONFIGURATION
+Telemetry Signature:
+  VPN-ACME-CORP tunnel status: UP (all network-side metrics normal)
+  LINK-SYD-MEL-FIBRE-01 optical power: STABLE, BER: 1.8e-12 (normal)
+  CORE-SYD-01 CPU: 18% (normal), BGP: stable
+  No network-side alerts — zero telemetry anomalies detected
+Created: 2026-01-28T10:00:00Z
+Resolved: 2026-01-28T11:00:00Z
+SLA Breached: No
+
+Description:
+Customer-side DNS configuration change caused internal name resolution to fail. VPN tunnel was up and healthy but customer reported complete service outage.
+
+Detection Method:
+Customer-reported — no network-side alerts generated
+
+Resolution:
+Customer corrected their DNS configuration. No network action required.
+
+Customer Impact:
+- VPN-ACME-CORP
+
+Services Affected: 1
+Alerts Generated: 0
+Alerts Suppressed: 0
+Time to Detect: 900 seconds
+Time to Reroute: 0 seconds
+Time to Resolve: 60 minutes
+
+Lessons Learned:
+Customer-side issues produce no network alerts. Consider end-to-end service probes that test at the application layer, not just network layer.

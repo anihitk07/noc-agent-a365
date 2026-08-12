@@ -1,0 +1,8 @@
+name: noc-agent-a365
+metadata:
+  template: noc-agent-a365
+services:
+  web:
+    project: agent
+    language: py
+    host: appservice

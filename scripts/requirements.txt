@@ -1,0 +1,17 @@
+# =============================================================================
+# Dependencies for scripts/create_foundry_iq_kb.py, create_fabric_ontology.py,
+# and create_fabric_data_agent.py.
+# =============================================================================
+
+# Foundry IQ knowledge base (Azure AI Search)
+azure-search-documents>=11.6.0b12
+
+# Fabric IQ (workspace/lakehouse/ontology + OneLake upload)
+microsoft-fabric-api>=1.0.0
+azure-storage-file-datalake>=12.16.0
+
+# Shared
+azure-identity>=1.25.3
+azure-core>=1.30.0
+httpx>=0.28.1
+python-dotenv>=1.0.0

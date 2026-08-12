@@ -1,0 +1,35 @@
+Incident: INC-2026-01-08-0003
+Title: OSPF flap storm SYD core - software bug
+Severity: P2
+Root Cause: CORE-SYD-01
+Root Cause Type: SOFTWARE_BUG
+Telemetry Signature:
+  CORE-SYD-01 CPU: 35% → 78% (OSPF SPF recalculations every 30s)
+  CORE-SYD-01 OSPF adjacency flaps: 120/hr (periodic — 30-second interval)
+  CORE-SYD-01 BGP sessions: all stable (no BGP impact)
+  All optical sensors: NORMAL (no physical layer impact)
+Created: 2026-01-08T01:15:00Z
+Resolved: 2026-01-08T02:00:00Z
+SLA Breached: No
+
+Description:
+Known IOS-XR bug caused OSPF adjacencies to flap every 30 seconds on CORE-SYD-01. Generated 500+ alerts per hour. BGP sessions remained stable.
+
+Detection Method:
+Alert rate anomaly — periodic pattern detected
+
+Resolution:
+Applied vendor hotfix SMU. OSPF stabilised within 5 minutes of patch.
+
+Customer Impact:
+(None)
+
+Services Affected: 0
+Alerts Generated: 2100
+Alerts Suppressed: 2099
+Time to Detect: 60 seconds
+Time to Reroute: 0 seconds
+Time to Resolve: 45 minutes
+
+Lessons Learned:
+Maintain vendor bug tracker integration. Periodic alert patterns (fixed interval flapping) should be flagged as potential software bugs, not hardware failures.

@@ -1,0 +1,41 @@
+{
+  "_comment": "Template only — copy to a365.config.json (gitignored) and fill in tenant-specific values before running `a365 setup all`. Never commit the real a365.config.json.",
+  "tenantId": "<your-tenant-id>",
+  "subscriptionId": "<your-subscription-id>",
+  "resourceGroup": "rg-noc-agent-a365",
+  "location": "eastus2",
+  "environment": "dev",
+  "needDeployment": false,
+  "graphBaseUrl": "https://graph.microsoft.com",
+  "clientAppId": "<populated after app registration>",
+  "appServicePlanName": "ASP-noc-agent-a365",
+  "appServicePlanSku": "B1",
+  "webAppName": "<from infra/main.bicep output agentHostAppName>",
+  "agentIdentityDisplayName": "noc-agent Identity",
+  "agentBlueprintDisplayName": "noc-agent Blueprint",
+  "agentUserPrincipalName": "nocagent@<your-tenant>.onmicrosoft.com",
+  "agentUserDisplayName": "NOC Agent",
+  "managerEmail": "<tenant admin email>",
+  "agentUserUsageLocation": "US",
+  "deploymentProjectPath": "agent",
+  "aiTeammate": true,
+  "agentDescription": "NOC/NOA network operations agent -- MAF orchestrator over Foundry IQ + Fabric IQ + Web IQ + Work IQ",
+  "messagingEndpoint": "https://<webAppName>.azurewebsites.net/api/messages",
+  "customBlueprintPermissions": [
+    {
+      "resourceAppId": "ea9ffc3e-8a23-4a7d-836d-234d7c7565c1",
+      "resourceName": "Agent 365 Tools",
+      "scopes": ["McpServers.Mail.All", "McpServers.Teams.All", "McpServersMetadata.Read.All"]
+    },
+    {
+      "resourceAppId": "7d312290-28c8-473c-a0ed-8e53749b6d6d",
+      "resourceName": "Microsoft Cognitive Services",
+      "scopes": ["user_impersonation"]
+    },
+    {
+      "resourceAppId": "18a66f5f-dbdf-4c17-9dd7-1634712a9cbe",
+      "resourceName": "Azure Machine Learning Services",
+      "scopes": ["user_impersonation"]
+    }
+  ]
+}

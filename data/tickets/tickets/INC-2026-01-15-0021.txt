@@ -1,0 +1,35 @@
+Incident: INC-2026-01-15-0021
+Title: Capacity exhaustion LINK-SYD-MEL-FIBRE-02
+Severity: P2
+Root Cause: LINK-SYD-MEL-FIBRE-02
+Root Cause Type: CAPACITY_EXHAUSTION
+Telemetry Signature:
+  LINK-SYD-MEL-FIBRE-01 Utilization: offline (scheduled maintenance)
+  LINK-SYD-MEL-FIBRE-02 Utilization: 52% → 88% → 95% (evening peak ramp)
+  LINK-SYD-MEL-FIBRE-02 QoS drops (BE class): 0 → 14,200 packets/sec
+  LINK-SYD-MEL-FIBRE-02 optical power: -10.5 dBm (STABLE — capacity issue, not physical)
+Created: 2026-01-15T18:30:00Z
+Resolved: 2026-01-15T20:30:00Z
+SLA Breached: No
+
+Description:
+LINK-SYD-MEL-FIBRE-02 utilisation reached 95% during evening peak after FIBRE-01 was taken offline for scheduled maintenance. QoS started dropping lower-priority traffic.
+
+Detection Method:
+Threshold-based alerting on UtilizationPct
+
+Resolution:
+Maintenance window on FIBRE-01 shortened. Traffic restored to both links. Capacity planning initiated for 400G upgrade.
+
+Customer Impact:
+- BB-BUNDLE-SYD-NORTH
+
+Services Affected: 1
+Alerts Generated: 34
+Alerts Suppressed: 33
+Time to Detect: 15 seconds
+Time to Reroute: 0 seconds
+Time to Resolve: 120 minutes
+
+Lessons Learned:
+Maintenance scheduling must account for remaining capacity on alternate paths. Add capacity-aware maintenance window validation to change management process.

@@ -1,0 +1,2149 @@
+{
+  "topology_nodes": [
+    {
+      "id": "CORE-SYD-01",
+      "label": "CoreRouter",
+      "properties": {
+        "RouterId": "CORE-SYD-01",
+        "City": "Sydney",
+        "Region": "NSW",
+        "Vendor": "Cisco",
+        "Model": "ASR-9922",
+        "FirmwareVersion": "IOS-XR-7.9.2",
+        "Latitude": "-33.8688",
+        "Longitude": "151.2093",
+        "_size": 9,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "CORE-MEL-01",
+      "label": "CoreRouter",
+      "properties": {
+        "RouterId": "CORE-MEL-01",
+        "City": "Melbourne",
+        "Region": "VIC",
+        "Vendor": "Cisco",
+        "Model": "ASR-9922",
+        "FirmwareVersion": "IOS-XR-7.9.2",
+        "Latitude": "-37.8136",
+        "Longitude": "144.9631",
+        "_size": 9,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "CORE-BNE-01",
+      "label": "CoreRouter",
+      "properties": {
+        "RouterId": "CORE-BNE-01",
+        "City": "Brisbane",
+        "Region": "QLD",
+        "Vendor": "Juniper",
+        "Model": "MX10008",
+        "FirmwareVersion": "JUNOS-23.4R1",
+        "Latitude": "-27.4698",
+        "Longitude": "153.0251",
+        "_size": 9
+      }
+    },
+    {
+      "id": "AGG-SYD-NORTH-01",
+      "label": "AggSwitch",
+      "properties": {
+        "SwitchId": "AGG-SYD-NORTH-01",
+        "City": "Sydney",
+        "UplinkRouterId": "CORE-SYD-01",
+        "Latitude": "-33.7960",
+        "Longitude": "151.1840",
+        "_size": 7
+      }
+    },
+    {
+      "id": "AGG-SYD-SOUTH-01",
+      "label": "AggSwitch",
+      "properties": {
+        "SwitchId": "AGG-SYD-SOUTH-01",
+        "City": "Sydney",
+        "UplinkRouterId": "CORE-SYD-01",
+        "Latitude": "-33.9410",
+        "Longitude": "151.1730",
+        "_size": 7
+      }
+    },
+    {
+      "id": "AGG-MEL-EAST-01",
+      "label": "AggSwitch",
+      "properties": {
+        "SwitchId": "AGG-MEL-EAST-01",
+        "City": "Melbourne",
+        "UplinkRouterId": "CORE-MEL-01",
+        "Latitude": "-37.8200",
+        "Longitude": "145.0650",
+        "_size": 7
+      }
+    },
+    {
+      "id": "AGG-MEL-WEST-01",
+      "label": "AggSwitch",
+      "properties": {
+        "SwitchId": "AGG-MEL-WEST-01",
+        "City": "Melbourne",
+        "UplinkRouterId": "CORE-MEL-01",
+        "Latitude": "-37.8100",
+        "Longitude": "144.8850",
+        "_size": 7
+      }
+    },
+    {
+      "id": "AGG-BNE-CENTRAL-01",
+      "label": "AggSwitch",
+      "properties": {
+        "SwitchId": "AGG-BNE-CENTRAL-01",
+        "City": "Brisbane",
+        "UplinkRouterId": "CORE-BNE-01",
+        "Latitude": "-27.4700",
+        "Longitude": "153.0230",
+        "_size": 7
+      }
+    },
+    {
+      "id": "AGG-BNE-SOUTH-01",
+      "label": "AggSwitch",
+      "properties": {
+        "SwitchId": "AGG-BNE-SOUTH-01",
+        "City": "Brisbane",
+        "UplinkRouterId": "CORE-BNE-01",
+        "Latitude": "-27.5540",
+        "Longitude": "153.0480",
+        "_size": 7
+      }
+    },
+    {
+      "id": "GNB-SYD-2041",
+      "label": "BaseStation",
+      "properties": {
+        "StationId": "GNB-SYD-2041",
+        "StationType": "5G_NR",
+        "AggSwitchId": "AGG-SYD-NORTH-01",
+        "City": "Sydney",
+        "_size": 6,
+        "_discounted": "true"
+      }
+    },
+    {
+      "id": "GNB-SYD-2042",
+      "label": "BaseStation",
+      "properties": {
+        "StationId": "GNB-SYD-2042",
+        "StationType": "5G_NR",
+        "AggSwitchId": "AGG-SYD-NORTH-01",
+        "City": "Sydney",
+        "_size": 6,
+        "_discounted": "true"
+      }
+    },
+    {
+      "id": "GNB-SYD-2043",
+      "label": "BaseStation",
+      "properties": {
+        "StationId": "GNB-SYD-2043",
+        "StationType": "5G_NR",
+        "AggSwitchId": "AGG-SYD-SOUTH-01",
+        "City": "Sydney",
+        "_size": 6
+      }
+    },
+    {
+      "id": "GNB-MEL-3011",
+      "label": "BaseStation",
+      "properties": {
+        "StationId": "GNB-MEL-3011",
+        "StationType": "5G_NR",
+        "AggSwitchId": "AGG-MEL-EAST-01",
+        "City": "Melbourne",
+        "_size": 6,
+        "_discounted": "true"
+      }
+    },
+    {
+      "id": "GNB-MEL-3012",
+      "label": "BaseStation",
+      "properties": {
+        "StationId": "GNB-MEL-3012",
+        "StationType": "5G_NR",
+        "AggSwitchId": "AGG-MEL-EAST-01",
+        "City": "Melbourne",
+        "_size": 6
+      }
+    },
+    {
+      "id": "GNB-MEL-3021",
+      "label": "BaseStation",
+      "properties": {
+        "StationId": "GNB-MEL-3021",
+        "StationType": "5G_NR",
+        "AggSwitchId": "AGG-MEL-WEST-01",
+        "City": "Melbourne",
+        "_size": 6
+      }
+    },
+    {
+      "id": "GNB-BNE-4011",
+      "label": "BaseStation",
+      "properties": {
+        "StationId": "GNB-BNE-4011",
+        "StationType": "5G_NR",
+        "AggSwitchId": "AGG-BNE-CENTRAL-01",
+        "City": "Brisbane",
+        "_size": 6
+      }
+    },
+    {
+      "id": "GNB-BNE-4012",
+      "label": "BaseStation",
+      "properties": {
+        "StationId": "GNB-BNE-4012",
+        "StationType": "5G_NR",
+        "AggSwitchId": "AGG-BNE-SOUTH-01",
+        "City": "Brisbane",
+        "_size": 6
+      }
+    },
+    {
+      "id": "LINK-SYD-MEL-FIBRE-01",
+      "label": "TransportLink",
+      "properties": {
+        "LinkId": "LINK-SYD-MEL-FIBRE-01",
+        "LinkType": "DWDM_100G",
+        "CapacityGbps": "100",
+        "SourceRouterId": "CORE-SYD-01",
+        "TargetRouterId": "CORE-MEL-01",
+        "_size": 5,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "LINK-SYD-MEL-FIBRE-02",
+      "label": "TransportLink",
+      "properties": {
+        "LinkId": "LINK-SYD-MEL-FIBRE-02",
+        "LinkType": "DWDM_100G",
+        "CapacityGbps": "100",
+        "SourceRouterId": "CORE-SYD-01",
+        "TargetRouterId": "CORE-MEL-01",
+        "_size": 5,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "LINK-SYD-BNE-FIBRE-01",
+      "label": "TransportLink",
+      "properties": {
+        "LinkId": "LINK-SYD-BNE-FIBRE-01",
+        "LinkType": "DWDM_100G",
+        "CapacityGbps": "100",
+        "SourceRouterId": "CORE-SYD-01",
+        "TargetRouterId": "CORE-BNE-01",
+        "_size": 5
+      }
+    },
+    {
+      "id": "LINK-MEL-BNE-FIBRE-01",
+      "label": "TransportLink",
+      "properties": {
+        "LinkId": "LINK-MEL-BNE-FIBRE-01",
+        "LinkType": "DWDM_100G",
+        "CapacityGbps": "100",
+        "SourceRouterId": "CORE-MEL-01",
+        "TargetRouterId": "CORE-BNE-01",
+        "_size": 5
+      }
+    },
+    {
+      "id": "LINK-SYD-AGG-NORTH-01",
+      "label": "TransportLink",
+      "properties": {
+        "LinkId": "LINK-SYD-AGG-NORTH-01",
+        "LinkType": "100GE",
+        "CapacityGbps": "100",
+        "SourceRouterId": "CORE-SYD-01",
+        "TargetRouterId": "CORE-SYD-01",
+        "_size": 5
+      }
+    },
+    {
+      "id": "LINK-SYD-AGG-SOUTH-01",
+      "label": "TransportLink",
+      "properties": {
+        "LinkId": "LINK-SYD-AGG-SOUTH-01",
+        "LinkType": "100GE",
+        "CapacityGbps": "100",
+        "SourceRouterId": "CORE-SYD-01",
+        "TargetRouterId": "CORE-SYD-01",
+        "_size": 5
+      }
+    },
+    {
+      "id": "LINK-MEL-AGG-EAST-01",
+      "label": "TransportLink",
+      "properties": {
+        "LinkId": "LINK-MEL-AGG-EAST-01",
+        "LinkType": "100GE",
+        "CapacityGbps": "100",
+        "SourceRouterId": "CORE-MEL-01",
+        "TargetRouterId": "CORE-MEL-01",
+        "_size": 5
+      }
+    },
+    {
+      "id": "LINK-MEL-AGG-WEST-01",
+      "label": "TransportLink",
+      "properties": {
+        "LinkId": "LINK-MEL-AGG-WEST-01",
+        "LinkType": "100GE",
+        "CapacityGbps": "100",
+        "SourceRouterId": "CORE-MEL-01",
+        "TargetRouterId": "CORE-MEL-01",
+        "_size": 5
+      }
+    },
+    {
+      "id": "LINK-BNE-AGG-CENTRAL-01",
+      "label": "TransportLink",
+      "properties": {
+        "LinkId": "LINK-BNE-AGG-CENTRAL-01",
+        "LinkType": "100GE",
+        "CapacityGbps": "100",
+        "SourceRouterId": "CORE-BNE-01",
+        "TargetRouterId": "CORE-BNE-01",
+        "_size": 5
+      }
+    },
+    {
+      "id": "LINK-BNE-AGG-SOUTH-01",
+      "label": "TransportLink",
+      "properties": {
+        "LinkId": "LINK-BNE-AGG-SOUTH-01",
+        "LinkType": "100GE",
+        "CapacityGbps": "100",
+        "SourceRouterId": "CORE-BNE-01",
+        "TargetRouterId": "CORE-BNE-01",
+        "_size": 5
+      }
+    },
+    {
+      "id": "MPLS-PATH-SYD-MEL-PRIMARY",
+      "label": "MPLSPath",
+      "properties": {
+        "PathId": "MPLS-PATH-SYD-MEL-PRIMARY",
+        "PathType": "PRIMARY",
+        "_size": 5,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "MPLS-PATH-SYD-MEL-SECONDARY",
+      "label": "MPLSPath",
+      "properties": {
+        "PathId": "MPLS-PATH-SYD-MEL-SECONDARY",
+        "PathType": "SECONDARY",
+        "_size": 5,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "MPLS-PATH-SYD-BNE-PRIMARY",
+      "label": "MPLSPath",
+      "properties": {
+        "PathId": "MPLS-PATH-SYD-BNE-PRIMARY",
+        "PathType": "PRIMARY",
+        "_size": 5
+      }
+    },
+    {
+      "id": "MPLS-PATH-MEL-BNE-PRIMARY",
+      "label": "MPLSPath",
+      "properties": {
+        "PathId": "MPLS-PATH-MEL-BNE-PRIMARY",
+        "PathType": "PRIMARY",
+        "_size": 5
+      }
+    },
+    {
+      "id": "MPLS-PATH-SYD-MEL-VIA-BNE",
+      "label": "MPLSPath",
+      "properties": {
+        "PathId": "MPLS-PATH-SYD-MEL-VIA-BNE",
+        "PathType": "TERTIARY",
+        "_size": 5,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "VPN-ACME-CORP",
+      "label": "Service",
+      "properties": {
+        "ServiceId": "VPN-ACME-CORP",
+        "ServiceType": "EnterpriseVPN",
+        "CustomerName": "ACME Corporation",
+        "CustomerCount": "1",
+        "ActiveUsers": "450",
+        "_size": 7,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "VPN-BIGBANK",
+      "label": "Service",
+      "properties": {
+        "ServiceId": "VPN-BIGBANK",
+        "ServiceType": "EnterpriseVPN",
+        "CustomerName": "BigBank Financial",
+        "CustomerCount": "1",
+        "ActiveUsers": "1200",
+        "_size": 7,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "VPN-OZMINE",
+      "label": "Service",
+      "properties": {
+        "ServiceId": "VPN-OZMINE",
+        "ServiceType": "EnterpriseVPN",
+        "CustomerName": "OzMine Resources",
+        "CustomerCount": "1",
+        "ActiveUsers": "680",
+        "_size": 7
+      }
+    },
+    {
+      "id": "BB-BUNDLE-SYD-NORTH",
+      "label": "Service",
+      "properties": {
+        "ServiceId": "BB-BUNDLE-SYD-NORTH",
+        "ServiceType": "Broadband",
+        "CustomerName": "Residential - Sydney North",
+        "CustomerCount": "3200",
+        "ActiveUsers": "3200",
+        "_size": 7
+      }
+    },
+    {
+      "id": "BB-BUNDLE-MEL-EAST",
+      "label": "Service",
+      "properties": {
+        "ServiceId": "BB-BUNDLE-MEL-EAST",
+        "ServiceType": "Broadband",
+        "CustomerName": "Residential - Melbourne East",
+        "CustomerCount": "2800",
+        "ActiveUsers": "2800",
+        "_size": 7
+      }
+    },
+    {
+      "id": "BB-BUNDLE-BNE-CENTRAL",
+      "label": "Service",
+      "properties": {
+        "ServiceId": "BB-BUNDLE-BNE-CENTRAL",
+        "ServiceType": "Broadband",
+        "CustomerName": "Residential - Brisbane Central",
+        "CustomerCount": "2400",
+        "ActiveUsers": "2400",
+        "_size": 7
+      }
+    },
+    {
+      "id": "MOB-5G-SYD-2041",
+      "label": "Service",
+      "properties": {
+        "ServiceId": "MOB-5G-SYD-2041",
+        "ServiceType": "Mobile5G",
+        "CustomerName": "Mobile Subscribers - SYD 2041",
+        "CustomerCount": "4200",
+        "ActiveUsers": "4200",
+        "_size": 7,
+        "_discounted": "true"
+      }
+    },
+    {
+      "id": "MOB-5G-SYD-2042",
+      "label": "Service",
+      "properties": {
+        "ServiceId": "MOB-5G-SYD-2042",
+        "ServiceType": "Mobile5G",
+        "CustomerName": "Mobile Subscribers - SYD 2042",
+        "CustomerCount": "4300",
+        "ActiveUsers": "4300",
+        "_size": 7,
+        "_discounted": "true"
+      }
+    },
+    {
+      "id": "MOB-5G-MEL-3011",
+      "label": "Service",
+      "properties": {
+        "ServiceId": "MOB-5G-MEL-3011",
+        "ServiceType": "Mobile5G",
+        "CustomerName": "Mobile Subscribers - MEL 3011",
+        "CustomerCount": "3800",
+        "ActiveUsers": "3800",
+        "_size": 7,
+        "_discounted": "true"
+      }
+    },
+    {
+      "id": "MOB-5G-BNE-4011",
+      "label": "Service",
+      "properties": {
+        "ServiceId": "MOB-5G-BNE-4011",
+        "ServiceType": "Mobile5G",
+        "CustomerName": "Mobile Subscribers - BNE 4011",
+        "CustomerCount": "3600",
+        "ActiveUsers": "3600",
+        "_size": 7
+      }
+    },
+    {
+      "id": "SLA-ACME-GOLD",
+      "label": "SLAPolicy",
+      "properties": {
+        "SLAPolicyId": "SLA-ACME-GOLD",
+        "ServiceId": "VPN-ACME-CORP",
+        "AvailabilityPct": "99.99",
+        "MaxLatencyMs": "15",
+        "PenaltyPerHourUSD": "50000",
+        "Tier": "GOLD",
+        "_size": 4,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "SLA-BIGBANK-SILVER",
+      "label": "SLAPolicy",
+      "properties": {
+        "SLAPolicyId": "SLA-BIGBANK-SILVER",
+        "ServiceId": "VPN-BIGBANK",
+        "AvailabilityPct": "99.95",
+        "MaxLatencyMs": "20",
+        "PenaltyPerHourUSD": "25000",
+        "Tier": "SILVER",
+        "_size": 4,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "SLA-OZMINE-GOLD",
+      "label": "SLAPolicy",
+      "properties": {
+        "SLAPolicyId": "SLA-OZMINE-GOLD",
+        "ServiceId": "VPN-OZMINE",
+        "AvailabilityPct": "99.99",
+        "MaxLatencyMs": "18",
+        "PenaltyPerHourUSD": "40000",
+        "Tier": "GOLD",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SLA-BB-SYD-STANDARD",
+      "label": "SLAPolicy",
+      "properties": {
+        "SLAPolicyId": "SLA-BB-SYD-STANDARD",
+        "ServiceId": "BB-BUNDLE-SYD-NORTH",
+        "AvailabilityPct": "99.5",
+        "MaxLatencyMs": "50",
+        "PenaltyPerHourUSD": "0",
+        "Tier": "STANDARD",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SLA-BB-BNE-STANDARD",
+      "label": "SLAPolicy",
+      "properties": {
+        "SLAPolicyId": "SLA-BB-BNE-STANDARD",
+        "ServiceId": "BB-BUNDLE-BNE-CENTRAL",
+        "AvailabilityPct": "99.5",
+        "MaxLatencyMs": "50",
+        "PenaltyPerHourUSD": "0",
+        "Tier": "STANDARD",
+        "_size": 4
+      }
+    },
+    {
+      "id": "BGP-SYD-MEL-01",
+      "label": "BGPSession",
+      "properties": {
+        "SessionId": "BGP-SYD-MEL-01",
+        "PeerARouterId": "CORE-SYD-01",
+        "PeerBRouterId": "CORE-MEL-01",
+        "ASNumberA": "64512",
+        "ASNumberB": "64513",
+        "_size": 5
+      }
+    },
+    {
+      "id": "BGP-SYD-BNE-01",
+      "label": "BGPSession",
+      "properties": {
+        "SessionId": "BGP-SYD-BNE-01",
+        "PeerARouterId": "CORE-SYD-01",
+        "PeerBRouterId": "CORE-BNE-01",
+        "ASNumberA": "64512",
+        "ASNumberB": "64514",
+        "_size": 5
+      }
+    },
+    {
+      "id": "BGP-MEL-BNE-01",
+      "label": "BGPSession",
+      "properties": {
+        "SessionId": "BGP-MEL-BNE-01",
+        "PeerARouterId": "CORE-MEL-01",
+        "PeerBRouterId": "CORE-BNE-01",
+        "ASNumberA": "64513",
+        "ASNumberB": "64514",
+        "_size": 5
+      }
+    },
+    {
+      "id": "CONDUIT-SYD-MEL-INLAND",
+      "label": "PhysicalConduit",
+      "properties": {
+        "ConduitId": "CONDUIT-SYD-MEL-INLAND",
+        "RouteDescription": "Sydney to Melbourne via Hume Highway / Goulburn — inland route through Southern Highlands",
+        "MaterialType": "Underground Duct",
+        "InstalledYear": "2018",
+        "_size": 6,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "CONDUIT-SYD-MEL-COASTAL",
+      "label": "PhysicalConduit",
+      "properties": {
+        "ConduitId": "CONDUIT-SYD-MEL-COASTAL",
+        "RouteDescription": "Sydney to Melbourne via Princes Highway — coastal route through Wollongong and Bairnsdale",
+        "MaterialType": "Underground Duct",
+        "InstalledYear": "2020",
+        "_size": 6
+      }
+    },
+    {
+      "id": "CONDUIT-SYD-BNE-PACIFIC",
+      "label": "PhysicalConduit",
+      "properties": {
+        "ConduitId": "CONDUIT-SYD-BNE-PACIFIC",
+        "RouteDescription": "Sydney to Brisbane via Pacific Highway — coastal route through Newcastle and Coffs Harbour",
+        "MaterialType": "Underground Duct",
+        "InstalledYear": "2019",
+        "_size": 6
+      }
+    },
+    {
+      "id": "AMP-SYD-MEL-GOULBURN",
+      "label": "AmplifierSite",
+      "properties": {
+        "SiteId": "AMP-SYD-MEL-GOULBURN",
+        "Location": "Goulburn NSW — 195km from Sydney",
+        "InstalledYear": "2018",
+        "LastCalibration": "2025-09-15",
+        "Latitude": "-34.7546",
+        "Longitude": "149.7186",
+        "_size": 5,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "AMP-SYD-MEL-ALBURY",
+      "label": "AmplifierSite",
+      "properties": {
+        "SiteId": "AMP-SYD-MEL-ALBURY",
+        "Location": "Albury NSW — 460km from Sydney",
+        "InstalledYear": "2018",
+        "LastCalibration": "2025-06-20",
+        "Latitude": "-36.0737",
+        "Longitude": "146.9135",
+        "_size": 5
+      }
+    },
+    {
+      "id": "AMP-SYD-BNE-COFFS",
+      "label": "AmplifierSite",
+      "properties": {
+        "SiteId": "AMP-SYD-BNE-COFFS",
+        "Location": "Coffs Harbour NSW — 540km from Sydney",
+        "InstalledYear": "2019",
+        "LastCalibration": "2025-11-01",
+        "Latitude": "-30.2963",
+        "Longitude": "153.1157",
+        "_size": 5
+      }
+    },
+    {
+      "id": "AMP-MEL-BNE-GRAFTON",
+      "label": "AmplifierSite",
+      "properties": {
+        "SiteId": "AMP-MEL-BNE-GRAFTON",
+        "Location": "Grafton NSW — 340km from Melbourne via coastal route",
+        "InstalledYear": "2020",
+        "LastCalibration": "2025-03-10",
+        "Latitude": "-29.6900",
+        "Longitude": "152.9330",
+        "_size": 5
+      }
+    },
+    {
+      "id": "SENS-SYD-MEL-F1-OPT-001",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-SYD-MEL-F1-OPT-001",
+        "SensorType": "OpticalPower",
+        "MonitoredEntityId": "LINK-SYD-MEL-FIBRE-01",
+        "MonitoredEntityType": "TransportLink",
+        "MountLocation": "Splice point — 45km south of Sydney CBD near Campbelltown",
+        "Latitude": "-34.0650",
+        "Longitude": "150.8140",
+        "InstalledDate": "2018-06-15",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-SYD-MEL-F1-OPT-002",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-SYD-MEL-F1-OPT-002",
+        "SensorType": "OpticalPower",
+        "MonitoredEntityId": "LINK-SYD-MEL-FIBRE-01",
+        "MonitoredEntityType": "TransportLink",
+        "MountLocation": "Splice point — Goulburn interchange (near AMP-SYD-MEL-GOULBURN)",
+        "Latitude": "-34.7546",
+        "Longitude": "149.7186",
+        "InstalledDate": "2018-06-15",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-SYD-MEL-F1-OPT-003",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-SYD-MEL-F1-OPT-003",
+        "SensorType": "OpticalPower",
+        "MonitoredEntityId": "LINK-SYD-MEL-FIBRE-01",
+        "MonitoredEntityType": "TransportLink",
+        "MountLocation": "Splice point — 15km north of Albury (near AMP-SYD-MEL-ALBURY)",
+        "Latitude": "-36.0237",
+        "Longitude": "146.9120",
+        "InstalledDate": "2018-06-15",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-SYD-MEL-F1-BER-001",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-SYD-MEL-F1-BER-001",
+        "SensorType": "BitErrorRate",
+        "MonitoredEntityId": "LINK-SYD-MEL-FIBRE-01",
+        "MonitoredEntityType": "TransportLink",
+        "MountLocation": "Head-end transceiver bay — CORE-SYD-01 rack B3",
+        "Latitude": "-33.8688",
+        "Longitude": "151.2093",
+        "InstalledDate": "2018-06-15",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-SYD-MEL-F1-BER-002",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-SYD-MEL-F1-BER-002",
+        "SensorType": "BitErrorRate",
+        "MonitoredEntityId": "LINK-SYD-MEL-FIBRE-01",
+        "MonitoredEntityType": "TransportLink",
+        "MountLocation": "Tail-end transceiver bay — CORE-MEL-01 rack A7",
+        "Latitude": "-37.8136",
+        "Longitude": "144.9631",
+        "InstalledDate": "2018-06-15",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-SYD-MEL-F2-OPT-001",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-SYD-MEL-F2-OPT-001",
+        "SensorType": "OpticalPower",
+        "MonitoredEntityId": "LINK-SYD-MEL-FIBRE-02",
+        "MonitoredEntityType": "TransportLink",
+        "MountLocation": "Splice point — 45km south of Sydney CBD near Campbelltown",
+        "Latitude": "-34.0650",
+        "Longitude": "150.8140",
+        "InstalledDate": "2020-03-10",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-SYD-MEL-F2-OPT-002",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-SYD-MEL-F2-OPT-002",
+        "SensorType": "OpticalPower",
+        "MonitoredEntityId": "LINK-SYD-MEL-FIBRE-02",
+        "MonitoredEntityType": "TransportLink",
+        "MountLocation": "Splice point — Goulburn interchange (shared conduit with FIBRE-01)",
+        "Latitude": "-34.7546",
+        "Longitude": "149.7186",
+        "InstalledDate": "2020-03-10",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-SYD-BNE-F1-OPT-001",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-SYD-BNE-F1-OPT-001",
+        "SensorType": "OpticalPower",
+        "MonitoredEntityId": "LINK-SYD-BNE-FIBRE-01",
+        "MonitoredEntityType": "TransportLink",
+        "MountLocation": "Splice point — 80km north of Sydney near Gosford",
+        "Latitude": "-33.4250",
+        "Longitude": "151.3420",
+        "InstalledDate": "2019-04-20",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-SYD-BNE-F1-OPT-002",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-SYD-BNE-F1-OPT-002",
+        "SensorType": "OpticalPower",
+        "MonitoredEntityId": "LINK-SYD-BNE-FIBRE-01",
+        "MonitoredEntityType": "TransportLink",
+        "MountLocation": "Splice point — near AMP-SYD-BNE-COFFS (Coffs Harbour)",
+        "Latitude": "-30.2963",
+        "Longitude": "153.1157",
+        "InstalledDate": "2019-04-20",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-MEL-BNE-F1-OPT-001",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-MEL-BNE-F1-OPT-001",
+        "SensorType": "OpticalPower",
+        "MonitoredEntityId": "LINK-MEL-BNE-FIBRE-01",
+        "MonitoredEntityType": "TransportLink",
+        "MountLocation": "Splice point — 120km east of Melbourne near Sale",
+        "Latitude": "-38.1000",
+        "Longitude": "147.0680",
+        "InstalledDate": "2020-03-10",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-MEL-BNE-F1-OPT-002",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-MEL-BNE-F1-OPT-002",
+        "SensorType": "OpticalPower",
+        "MonitoredEntityId": "LINK-MEL-BNE-FIBRE-01",
+        "MonitoredEntityType": "TransportLink",
+        "MountLocation": "Splice point — near AMP-MEL-BNE-GRAFTON (Grafton)",
+        "Latitude": "-29.6900",
+        "Longitude": "152.9330",
+        "InstalledDate": "2020-03-10",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-CORE-SYD-01-TEMP-001",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-CORE-SYD-01-TEMP-001",
+        "SensorType": "Temperature",
+        "MonitoredEntityId": "CORE-SYD-01",
+        "MonitoredEntityType": "CoreRouter",
+        "MountLocation": "Main chassis — exhaust vent sensor",
+        "Latitude": "-33.8688",
+        "Longitude": "151.2093",
+        "InstalledDate": "2019-01-10",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-CORE-SYD-01-CPU-001",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-CORE-SYD-01-CPU-001",
+        "SensorType": "CPULoad",
+        "MonitoredEntityId": "CORE-SYD-01",
+        "MonitoredEntityType": "CoreRouter",
+        "MountLocation": "Control plane module",
+        "Latitude": "-33.8688",
+        "Longitude": "151.2093",
+        "InstalledDate": "2019-01-10",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-CORE-MEL-01-TEMP-001",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-CORE-MEL-01-TEMP-001",
+        "SensorType": "Temperature",
+        "MonitoredEntityId": "CORE-MEL-01",
+        "MonitoredEntityType": "CoreRouter",
+        "MountLocation": "Main chassis — exhaust vent sensor",
+        "Latitude": "-37.8136",
+        "Longitude": "144.9631",
+        "InstalledDate": "2019-01-10",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-CORE-MEL-01-CPU-001",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-CORE-MEL-01-CPU-001",
+        "SensorType": "CPULoad",
+        "MonitoredEntityId": "CORE-MEL-01",
+        "MonitoredEntityType": "CoreRouter",
+        "MountLocation": "Control plane module",
+        "Latitude": "-37.8136",
+        "Longitude": "144.9631",
+        "InstalledDate": "2019-01-10",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "SENS-CORE-BNE-01-TEMP-001",
+      "label": "Sensor",
+      "properties": {
+        "SensorId": "SENS-CORE-BNE-01-TEMP-001",
+        "SensorType": "Temperature",
+        "MonitoredEntityId": "CORE-BNE-01",
+        "MonitoredEntityType": "CoreRouter",
+        "MountLocation": "Main chassis — exhaust vent sensor",
+        "Latitude": "-27.4698",
+        "Longitude": "153.0251",
+        "InstalledDate": "2019-01-10",
+        "Status": "ACTIVE",
+        "_size": 4
+      }
+    },
+    {
+      "id": "DEPOT-SYD-CAMPBELLTOWN",
+      "label": "Depot",
+      "properties": {
+        "DepotId": "DEPOT-SYD-CAMPBELLTOWN",
+        "DepotName": "Campbelltown Depot",
+        "City": "Sydney",
+        "Region": "NSW",
+        "DepotType": "CityHub",
+        "Latitude": "-34.0650",
+        "Longitude": "150.8140",
+        "ServicedEntityId": "CORE-SYD-01",
+        "ServicedEntityType": "CoreRouter",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DEPOT-MEL-CLAYTON",
+      "label": "Depot",
+      "properties": {
+        "DepotId": "DEPOT-MEL-CLAYTON",
+        "DepotName": "Clayton Depot",
+        "City": "Melbourne",
+        "Region": "VIC",
+        "DepotType": "CityHub",
+        "Latitude": "-37.9250",
+        "Longitude": "145.1200",
+        "ServicedEntityId": "CORE-MEL-01",
+        "ServicedEntityType": "CoreRouter",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DEPOT-BNE-EAGLEFARM",
+      "label": "Depot",
+      "properties": {
+        "DepotId": "DEPOT-BNE-EAGLEFARM",
+        "DepotName": "Eagle Farm Depot",
+        "City": "Brisbane",
+        "Region": "QLD",
+        "DepotType": "CityHub",
+        "Latitude": "-27.4380",
+        "Longitude": "153.0780",
+        "ServicedEntityId": "CORE-BNE-01",
+        "ServicedEntityType": "CoreRouter",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DEPOT-GOULBURN",
+      "label": "Depot",
+      "properties": {
+        "DepotId": "DEPOT-GOULBURN",
+        "DepotName": "Goulburn Regional Depot",
+        "City": "Goulburn",
+        "Region": "NSW",
+        "DepotType": "RegionalDepot",
+        "Latitude": "-34.7546",
+        "Longitude": "149.7186",
+        "ServicedEntityId": "AMP-SYD-MEL-GOULBURN",
+        "ServicedEntityType": "AmplifierSite",
+        "_size": 5,
+        "_incident": "true"
+      }
+    },
+    {
+      "id": "DEPOT-ALBURY",
+      "label": "Depot",
+      "properties": {
+        "DepotId": "DEPOT-ALBURY",
+        "DepotName": "Albury Regional Depot",
+        "City": "Albury",
+        "Region": "NSW",
+        "DepotType": "RegionalDepot",
+        "Latitude": "-36.0737",
+        "Longitude": "146.9135",
+        "ServicedEntityId": "AMP-SYD-MEL-ALBURY",
+        "ServicedEntityType": "AmplifierSite",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DEPOT-COFFS",
+      "label": "Depot",
+      "properties": {
+        "DepotId": "DEPOT-COFFS",
+        "DepotName": "Coffs Harbour Regional Depot",
+        "City": "Coffs Harbour",
+        "Region": "NSW",
+        "DepotType": "RegionalDepot",
+        "Latitude": "-30.2963",
+        "Longitude": "153.1157",
+        "ServicedEntityId": "AMP-SYD-BNE-COFFS",
+        "ServicedEntityType": "AmplifierSite",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DUTY-SYD-2026-02-20-DAY",
+      "label": "DutyRoster",
+      "properties": {
+        "RosterId": "DUTY-SYD-2026-02-20-DAY",
+        "PersonName": "Marcus Chen",
+        "Email": "marcus.chen@austtelco.com.au",
+        "Phone": "+61-412-555-101",
+        "City": "Sydney",
+        "Region": "NSW",
+        "ShiftStart": "2026-02-20T06:00:00Z",
+        "ShiftEnd": "2026-02-20T18:00:00Z",
+        "Role": "FieldEngineer",
+        "HomeBase": "Campbelltown Depot -34.0650 150.8140",
+        "VehicleId": "VEH-SYD-03",
+        "DepotId": "DEPOT-SYD-CAMPBELLTOWN",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DUTY-SYD-2026-02-20-NIGHT",
+      "label": "DutyRoster",
+      "properties": {
+        "RosterId": "DUTY-SYD-2026-02-20-NIGHT",
+        "PersonName": "Sarah O'Brien",
+        "Email": "sarah.obrien@austtelco.com.au",
+        "Phone": "+61-412-555-102",
+        "City": "Sydney",
+        "Region": "NSW",
+        "ShiftStart": "2026-02-20T18:00:00Z",
+        "ShiftEnd": "2026-02-21T06:00:00Z",
+        "Role": "FieldEngineer",
+        "HomeBase": "Parramatta Depot -33.8150 151.0010",
+        "VehicleId": "VEH-SYD-07",
+        "DepotId": "DEPOT-SYD-CAMPBELLTOWN",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DUTY-MEL-2026-02-20-DAY",
+      "label": "DutyRoster",
+      "properties": {
+        "RosterId": "DUTY-MEL-2026-02-20-DAY",
+        "PersonName": "James Nguyen",
+        "Email": "james.nguyen@austtelco.com.au",
+        "Phone": "+61-412-555-201",
+        "City": "Melbourne",
+        "Region": "VIC",
+        "ShiftStart": "2026-02-20T06:00:00Z",
+        "ShiftEnd": "2026-02-20T18:00:00Z",
+        "Role": "FieldEngineer",
+        "HomeBase": "Clayton Depot -37.9250 145.1200",
+        "VehicleId": "VEH-MEL-02",
+        "DepotId": "DEPOT-MEL-CLAYTON",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DUTY-MEL-2026-02-20-NIGHT",
+      "label": "DutyRoster",
+      "properties": {
+        "RosterId": "DUTY-MEL-2026-02-20-NIGHT",
+        "PersonName": "Priya Sharma",
+        "Email": "priya.sharma@austtelco.com.au",
+        "Phone": "+61-412-555-202",
+        "City": "Melbourne",
+        "Region": "VIC",
+        "ShiftStart": "2026-02-20T18:00:00Z",
+        "ShiftEnd": "2026-02-21T06:00:00Z",
+        "Role": "FieldEngineer",
+        "HomeBase": "Footscray Depot -37.7990 144.8990",
+        "VehicleId": "VEH-MEL-05",
+        "DepotId": "DEPOT-MEL-CLAYTON",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DUTY-BNE-2026-02-20-DAY",
+      "label": "DutyRoster",
+      "properties": {
+        "RosterId": "DUTY-BNE-2026-02-20-DAY",
+        "PersonName": "Tom Williams",
+        "Email": "tom.williams@austtelco.com.au",
+        "Phone": "+61-412-555-301",
+        "City": "Brisbane",
+        "Region": "QLD",
+        "ShiftStart": "2026-02-20T06:00:00Z",
+        "ShiftEnd": "2026-02-20T18:00:00Z",
+        "Role": "FieldEngineer",
+        "HomeBase": "Eagle Farm Depot -27.4380 153.0780",
+        "VehicleId": "VEH-BNE-01",
+        "DepotId": "DEPOT-BNE-EAGLEFARM",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DUTY-REGIONAL-SYD-MEL-2026-02-20",
+      "label": "DutyRoster",
+      "properties": {
+        "RosterId": "DUTY-REGIONAL-SYD-MEL-2026-02-20",
+        "PersonName": "Dave Mitchell",
+        "Email": "dave.mitchell@austtelco.com.au",
+        "Phone": "+61-412-555-401",
+        "City": "Goulburn",
+        "Region": "NSW",
+        "ShiftStart": "2026-02-20T06:00:00Z",
+        "ShiftEnd": "2026-02-20T18:00:00Z",
+        "Role": "RegionalFieldEngineer",
+        "HomeBase": "Goulburn Office -34.7546 149.7186",
+        "VehicleId": "VEH-REG-02",
+        "DepotId": "DEPOT-GOULBURN",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DUTY-REGIONAL-SYD-MEL-2026-02-20-SOUTH",
+      "label": "DutyRoster",
+      "properties": {
+        "RosterId": "DUTY-REGIONAL-SYD-MEL-2026-02-20-SOUTH",
+        "PersonName": "Karen Lee",
+        "Email": "karen.lee@austtelco.com.au",
+        "Phone": "+61-412-555-402",
+        "City": "Albury",
+        "Region": "NSW",
+        "ShiftStart": "2026-02-20T06:00:00Z",
+        "ShiftEnd": "2026-02-20T18:00:00Z",
+        "Role": "RegionalFieldEngineer",
+        "HomeBase": "Albury Office -36.0737 146.9135",
+        "VehicleId": "VEH-REG-04",
+        "DepotId": "DEPOT-ALBURY",
+        "_size": 5
+      }
+    },
+    {
+      "id": "DUTY-REGIONAL-SYD-BNE-2026-02-20",
+      "label": "DutyRoster",
+      "properties": {
+        "RosterId": "DUTY-REGIONAL-SYD-BNE-2026-02-20",
+        "PersonName": "Paul Jacobs",
+        "Email": "paul.jacobs@austtelco.com.au",
+        "Phone": "+61-412-555-501",
+        "City": "Coffs Harbour",
+        "Region": "NSW",
+        "ShiftStart": "2026-02-20T06:00:00Z",
+        "ShiftEnd": "2026-02-20T18:00:00Z",
+        "Role": "RegionalFieldEngineer",
+        "HomeBase": "Coffs Harbour Office -30.2963 153.1157",
+        "VehicleId": "VEH-REG-06",
+        "DepotId": "DEPOT-COFFS",
+        "_size": 5
+      }
+    },
+    {
+      "id": "ADV-CISCO-2025-001",
+      "label": "Advisory",
+      "properties": {
+        "AdvisoryId": "ADV-CISCO-2025-001",
+        "VendorName": "Cisco",
+        "BugId": "CSCwi82345",
+        "AffectedVersions": "IOS-XR-7.9.1|IOS-XR-7.9.2",
+        "Severity": "HIGH",
+        "Title": "OSPF adjacency flap under high BGP churn",
+        "Description": "OSPF adjacency may drop when BGP table exceeds 500K prefixes during reconvergence. Affects ASR-9000 series running IOS-XR 7.9.x. Fixed in IOS-XR-7.10.1.",
+        "_size": 6
+      }
+    },
+    {
+      "id": "ADV-CISCO-2025-002",
+      "label": "Advisory",
+      "properties": {
+        "AdvisoryId": "ADV-CISCO-2025-002",
+        "VendorName": "Cisco",
+        "BugId": "CSCwi93456",
+        "AffectedVersions": "IOS-XR-7.8.1|IOS-XR-7.9.1|IOS-XR-7.9.2",
+        "Severity": "MEDIUM",
+        "Title": "BFD session timeout false positive on 100GE interfaces",
+        "Description": "BFD may report false link-down on 100GE interfaces under high utilisation (>90%). Affects ASR-9000 series. Workaround: increase BFD interval to 300ms.",
+        "_size": 6
+      }
+    },
+    {
+      "id": "ADV-JUNIPER-2025-001",
+      "label": "Advisory",
+      "properties": {
+        "AdvisoryId": "ADV-JUNIPER-2025-001",
+        "VendorName": "Juniper",
+        "BugId": "PR1789012",
+        "AffectedVersions": "JUNOS-23.4R1|JUNOS-23.4R2",
+        "Severity": "HIGH",
+        "Title": "MPLS LDP session reset during ECMP rebalancing",
+        "Description": "LDP sessions may reset when ECMP path count changes from 2 to 1 during link failure. Affects MX10000 series. Fixed in JUNOS-24.1R1.",
+        "_size": 6
+      }
+    }
+  ],
+  "topology_edges": [
+    {
+      "id": "connects_to:LINK-SYD-MEL-FIBRE-01→CORE-SYD-01",
+      "source": "LINK-SYD-MEL-FIBRE-01",
+      "target": "CORE-SYD-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "source"
+      }
+    },
+    {
+      "id": "connects_to:LINK-SYD-MEL-FIBRE-02→CORE-SYD-01",
+      "source": "LINK-SYD-MEL-FIBRE-02",
+      "target": "CORE-SYD-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "source"
+      }
+    },
+    {
+      "id": "connects_to:LINK-SYD-BNE-FIBRE-01→CORE-SYD-01",
+      "source": "LINK-SYD-BNE-FIBRE-01",
+      "target": "CORE-SYD-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "source"
+      }
+    },
+    {
+      "id": "connects_to:LINK-MEL-BNE-FIBRE-01→CORE-MEL-01",
+      "source": "LINK-MEL-BNE-FIBRE-01",
+      "target": "CORE-MEL-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "source"
+      }
+    },
+    {
+      "id": "connects_to:LINK-SYD-AGG-NORTH-01→CORE-SYD-01",
+      "source": "LINK-SYD-AGG-NORTH-01",
+      "target": "CORE-SYD-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "source"
+      }
+    },
+    {
+      "id": "connects_to:LINK-SYD-AGG-SOUTH-01→CORE-SYD-01",
+      "source": "LINK-SYD-AGG-SOUTH-01",
+      "target": "CORE-SYD-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "source"
+      }
+    },
+    {
+      "id": "connects_to:LINK-MEL-AGG-EAST-01→CORE-MEL-01",
+      "source": "LINK-MEL-AGG-EAST-01",
+      "target": "CORE-MEL-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "source"
+      }
+    },
+    {
+      "id": "connects_to:LINK-MEL-AGG-WEST-01→CORE-MEL-01",
+      "source": "LINK-MEL-AGG-WEST-01",
+      "target": "CORE-MEL-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "source"
+      }
+    },
+    {
+      "id": "connects_to:LINK-BNE-AGG-CENTRAL-01→CORE-BNE-01",
+      "source": "LINK-BNE-AGG-CENTRAL-01",
+      "target": "CORE-BNE-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "source"
+      }
+    },
+    {
+      "id": "connects_to:LINK-BNE-AGG-SOUTH-01→CORE-BNE-01",
+      "source": "LINK-BNE-AGG-SOUTH-01",
+      "target": "CORE-BNE-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "source"
+      }
+    },
+    {
+      "id": "connects_to:LINK-SYD-MEL-FIBRE-01→CORE-MEL-01",
+      "source": "LINK-SYD-MEL-FIBRE-01",
+      "target": "CORE-MEL-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "target"
+      }
+    },
+    {
+      "id": "connects_to:LINK-SYD-MEL-FIBRE-02→CORE-MEL-01",
+      "source": "LINK-SYD-MEL-FIBRE-02",
+      "target": "CORE-MEL-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "target"
+      }
+    },
+    {
+      "id": "connects_to:LINK-SYD-BNE-FIBRE-01→CORE-BNE-01",
+      "source": "LINK-SYD-BNE-FIBRE-01",
+      "target": "CORE-BNE-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "target"
+      }
+    },
+    {
+      "id": "connects_to:LINK-MEL-BNE-FIBRE-01→CORE-BNE-01",
+      "source": "LINK-MEL-BNE-FIBRE-01",
+      "target": "CORE-BNE-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "target"
+      }
+    },
+    {
+      "id": "connects_to:LINK-SYD-AGG-NORTH-01→CORE-SYD-01#1",
+      "source": "LINK-SYD-AGG-NORTH-01",
+      "target": "CORE-SYD-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "target"
+      }
+    },
+    {
+      "id": "connects_to:LINK-SYD-AGG-SOUTH-01→CORE-SYD-01#1",
+      "source": "LINK-SYD-AGG-SOUTH-01",
+      "target": "CORE-SYD-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "target"
+      }
+    },
+    {
+      "id": "connects_to:LINK-MEL-AGG-EAST-01→CORE-MEL-01#1",
+      "source": "LINK-MEL-AGG-EAST-01",
+      "target": "CORE-MEL-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "target"
+      }
+    },
+    {
+      "id": "connects_to:LINK-MEL-AGG-WEST-01→CORE-MEL-01#1",
+      "source": "LINK-MEL-AGG-WEST-01",
+      "target": "CORE-MEL-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "target"
+      }
+    },
+    {
+      "id": "connects_to:LINK-BNE-AGG-CENTRAL-01→CORE-BNE-01#1",
+      "source": "LINK-BNE-AGG-CENTRAL-01",
+      "target": "CORE-BNE-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "target"
+      }
+    },
+    {
+      "id": "connects_to:LINK-BNE-AGG-SOUTH-01→CORE-BNE-01#1",
+      "source": "LINK-BNE-AGG-SOUTH-01",
+      "target": "CORE-BNE-01",
+      "label": "connects_to",
+      "properties": {
+        "direction": "target"
+      }
+    },
+    {
+      "id": "aggregates_to:AGG-SYD-NORTH-01→CORE-SYD-01",
+      "source": "AGG-SYD-NORTH-01",
+      "target": "CORE-SYD-01",
+      "label": "aggregates_to",
+      "properties": {}
+    },
+    {
+      "id": "aggregates_to:AGG-SYD-SOUTH-01→CORE-SYD-01",
+      "source": "AGG-SYD-SOUTH-01",
+      "target": "CORE-SYD-01",
+      "label": "aggregates_to",
+      "properties": {}
+    },
+    {
+      "id": "aggregates_to:AGG-MEL-EAST-01→CORE-MEL-01",
+      "source": "AGG-MEL-EAST-01",
+      "target": "CORE-MEL-01",
+      "label": "aggregates_to",
+      "properties": {}
+    },
+    {
+      "id": "aggregates_to:AGG-MEL-WEST-01→CORE-MEL-01",
+      "source": "AGG-MEL-WEST-01",
+      "target": "CORE-MEL-01",
+      "label": "aggregates_to",
+      "properties": {}
+    },
+    {
+      "id": "aggregates_to:AGG-BNE-CENTRAL-01→CORE-BNE-01",
+      "source": "AGG-BNE-CENTRAL-01",
+      "target": "CORE-BNE-01",
+      "label": "aggregates_to",
+      "properties": {}
+    },
+    {
+      "id": "aggregates_to:AGG-BNE-SOUTH-01→CORE-BNE-01",
+      "source": "AGG-BNE-SOUTH-01",
+      "target": "CORE-BNE-01",
+      "label": "aggregates_to",
+      "properties": {}
+    },
+    {
+      "id": "backhauls_via:GNB-SYD-2041→AGG-SYD-NORTH-01",
+      "source": "GNB-SYD-2041",
+      "target": "AGG-SYD-NORTH-01",
+      "label": "backhauls_via",
+      "properties": {}
+    },
+    {
+      "id": "backhauls_via:GNB-SYD-2042→AGG-SYD-NORTH-01",
+      "source": "GNB-SYD-2042",
+      "target": "AGG-SYD-NORTH-01",
+      "label": "backhauls_via",
+      "properties": {}
+    },
+    {
+      "id": "backhauls_via:GNB-SYD-2043→AGG-SYD-SOUTH-01",
+      "source": "GNB-SYD-2043",
+      "target": "AGG-SYD-SOUTH-01",
+      "label": "backhauls_via",
+      "properties": {}
+    },
+    {
+      "id": "backhauls_via:GNB-MEL-3011→AGG-MEL-EAST-01",
+      "source": "GNB-MEL-3011",
+      "target": "AGG-MEL-EAST-01",
+      "label": "backhauls_via",
+      "properties": {}
+    },
+    {
+      "id": "backhauls_via:GNB-MEL-3012→AGG-MEL-EAST-01",
+      "source": "GNB-MEL-3012",
+      "target": "AGG-MEL-EAST-01",
+      "label": "backhauls_via",
+      "properties": {}
+    },
+    {
+      "id": "backhauls_via:GNB-MEL-3021→AGG-MEL-WEST-01",
+      "source": "GNB-MEL-3021",
+      "target": "AGG-MEL-WEST-01",
+      "label": "backhauls_via",
+      "properties": {}
+    },
+    {
+      "id": "backhauls_via:GNB-BNE-4011→AGG-BNE-CENTRAL-01",
+      "source": "GNB-BNE-4011",
+      "target": "AGG-BNE-CENTRAL-01",
+      "label": "backhauls_via",
+      "properties": {}
+    },
+    {
+      "id": "backhauls_via:GNB-BNE-4012→AGG-BNE-SOUTH-01",
+      "source": "GNB-BNE-4012",
+      "target": "AGG-BNE-SOUTH-01",
+      "label": "backhauls_via",
+      "properties": {}
+    },
+    {
+      "id": "routes_via:MPLS-PATH-SYD-MEL-PRIMARY→LINK-SYD-MEL-FIBRE-01",
+      "source": "MPLS-PATH-SYD-MEL-PRIMARY",
+      "target": "LINK-SYD-MEL-FIBRE-01",
+      "label": "routes_via",
+      "properties": {
+        "HopOrder": "2"
+      }
+    },
+    {
+      "id": "routes_via:MPLS-PATH-SYD-MEL-SECONDARY→LINK-SYD-MEL-FIBRE-02",
+      "source": "MPLS-PATH-SYD-MEL-SECONDARY",
+      "target": "LINK-SYD-MEL-FIBRE-02",
+      "label": "routes_via",
+      "properties": {
+        "HopOrder": "2"
+      }
+    },
+    {
+      "id": "routes_via:MPLS-PATH-SYD-BNE-PRIMARY→LINK-SYD-BNE-FIBRE-01",
+      "source": "MPLS-PATH-SYD-BNE-PRIMARY",
+      "target": "LINK-SYD-BNE-FIBRE-01",
+      "label": "routes_via",
+      "properties": {
+        "HopOrder": "2"
+      }
+    },
+    {
+      "id": "routes_via:MPLS-PATH-MEL-BNE-PRIMARY→LINK-MEL-BNE-FIBRE-01",
+      "source": "MPLS-PATH-MEL-BNE-PRIMARY",
+      "target": "LINK-MEL-BNE-FIBRE-01",
+      "label": "routes_via",
+      "properties": {
+        "HopOrder": "2"
+      }
+    },
+    {
+      "id": "routes_via:MPLS-PATH-SYD-MEL-VIA-BNE→LINK-SYD-BNE-FIBRE-01",
+      "source": "MPLS-PATH-SYD-MEL-VIA-BNE",
+      "target": "LINK-SYD-BNE-FIBRE-01",
+      "label": "routes_via",
+      "properties": {
+        "HopOrder": "2"
+      }
+    },
+    {
+      "id": "routes_via:MPLS-PATH-SYD-MEL-VIA-BNE→LINK-MEL-BNE-FIBRE-01",
+      "source": "MPLS-PATH-SYD-MEL-VIA-BNE",
+      "target": "LINK-MEL-BNE-FIBRE-01",
+      "label": "routes_via",
+      "properties": {
+        "HopOrder": "4"
+      }
+    },
+    {
+      "id": "depends_on_mplspath:VPN-ACME-CORP→MPLS-PATH-SYD-MEL-PRIMARY",
+      "source": "VPN-ACME-CORP",
+      "target": "MPLS-PATH-SYD-MEL-PRIMARY",
+      "label": "depends_on_mplspath",
+      "properties": {
+        "DependencyStrength": "PRIMARY"
+      }
+    },
+    {
+      "id": "depends_on_mplspath:VPN-ACME-CORP→MPLS-PATH-SYD-MEL-SECONDARY",
+      "source": "VPN-ACME-CORP",
+      "target": "MPLS-PATH-SYD-MEL-SECONDARY",
+      "label": "depends_on_mplspath",
+      "properties": {
+        "DependencyStrength": "SECONDARY"
+      }
+    },
+    {
+      "id": "depends_on_mplspath:VPN-ACME-CORP→MPLS-PATH-SYD-MEL-VIA-BNE",
+      "source": "VPN-ACME-CORP",
+      "target": "MPLS-PATH-SYD-MEL-VIA-BNE",
+      "label": "depends_on_mplspath",
+      "properties": {
+        "DependencyStrength": "TERTIARY"
+      }
+    },
+    {
+      "id": "depends_on_mplspath:VPN-BIGBANK→MPLS-PATH-SYD-MEL-PRIMARY",
+      "source": "VPN-BIGBANK",
+      "target": "MPLS-PATH-SYD-MEL-PRIMARY",
+      "label": "depends_on_mplspath",
+      "properties": {
+        "DependencyStrength": "PRIMARY"
+      }
+    },
+    {
+      "id": "depends_on_mplspath:VPN-BIGBANK→MPLS-PATH-SYD-MEL-SECONDARY",
+      "source": "VPN-BIGBANK",
+      "target": "MPLS-PATH-SYD-MEL-SECONDARY",
+      "label": "depends_on_mplspath",
+      "properties": {
+        "DependencyStrength": "SECONDARY"
+      }
+    },
+    {
+      "id": "depends_on_mplspath:VPN-BIGBANK→MPLS-PATH-SYD-MEL-VIA-BNE",
+      "source": "VPN-BIGBANK",
+      "target": "MPLS-PATH-SYD-MEL-VIA-BNE",
+      "label": "depends_on_mplspath",
+      "properties": {
+        "DependencyStrength": "TERTIARY"
+      }
+    },
+    {
+      "id": "depends_on_mplspath:VPN-OZMINE→MPLS-PATH-SYD-BNE-PRIMARY",
+      "source": "VPN-OZMINE",
+      "target": "MPLS-PATH-SYD-BNE-PRIMARY",
+      "label": "depends_on_mplspath",
+      "properties": {
+        "DependencyStrength": "PRIMARY"
+      }
+    },
+    {
+      "id": "depends_on_mplspath:VPN-OZMINE→MPLS-PATH-SYD-MEL-VIA-BNE",
+      "source": "VPN-OZMINE",
+      "target": "MPLS-PATH-SYD-MEL-VIA-BNE",
+      "label": "depends_on_mplspath",
+      "properties": {
+        "DependencyStrength": "SECONDARY"
+      }
+    },
+    {
+      "id": "depends_on_aggswitch:BB-BUNDLE-SYD-NORTH→AGG-SYD-NORTH-01",
+      "source": "BB-BUNDLE-SYD-NORTH",
+      "target": "AGG-SYD-NORTH-01",
+      "label": "depends_on_aggswitch",
+      "properties": {
+        "DependencyStrength": "PRIMARY"
+      }
+    },
+    {
+      "id": "depends_on_aggswitch:BB-BUNDLE-MEL-EAST→AGG-MEL-EAST-01",
+      "source": "BB-BUNDLE-MEL-EAST",
+      "target": "AGG-MEL-EAST-01",
+      "label": "depends_on_aggswitch",
+      "properties": {
+        "DependencyStrength": "PRIMARY"
+      }
+    },
+    {
+      "id": "depends_on_aggswitch:BB-BUNDLE-BNE-CENTRAL→AGG-BNE-CENTRAL-01",
+      "source": "BB-BUNDLE-BNE-CENTRAL",
+      "target": "AGG-BNE-CENTRAL-01",
+      "label": "depends_on_aggswitch",
+      "properties": {
+        "DependencyStrength": "PRIMARY"
+      }
+    },
+    {
+      "id": "depends_on_basestation:MOB-5G-SYD-2041→GNB-SYD-2041",
+      "source": "MOB-5G-SYD-2041",
+      "target": "GNB-SYD-2041",
+      "label": "depends_on_basestation",
+      "properties": {
+        "DependencyStrength": "PRIMARY"
+      }
+    },
+    {
+      "id": "depends_on_basestation:MOB-5G-SYD-2042→GNB-SYD-2042",
+      "source": "MOB-5G-SYD-2042",
+      "target": "GNB-SYD-2042",
+      "label": "depends_on_basestation",
+      "properties": {
+        "DependencyStrength": "PRIMARY"
+      }
+    },
+    {
+      "id": "depends_on_basestation:MOB-5G-MEL-3011→GNB-MEL-3011",
+      "source": "MOB-5G-MEL-3011",
+      "target": "GNB-MEL-3011",
+      "label": "depends_on_basestation",
+      "properties": {
+        "DependencyStrength": "PRIMARY"
+      }
+    },
+    {
+      "id": "depends_on_basestation:MOB-5G-BNE-4011→GNB-BNE-4011",
+      "source": "MOB-5G-BNE-4011",
+      "target": "GNB-BNE-4011",
+      "label": "depends_on_basestation",
+      "properties": {
+        "DependencyStrength": "PRIMARY"
+      }
+    },
+    {
+      "id": "governed_by:SLA-ACME-GOLD→VPN-ACME-CORP",
+      "source": "SLA-ACME-GOLD",
+      "target": "VPN-ACME-CORP",
+      "label": "governed_by",
+      "properties": {}
+    },
+    {
+      "id": "governed_by:SLA-BIGBANK-SILVER→VPN-BIGBANK",
+      "source": "SLA-BIGBANK-SILVER",
+      "target": "VPN-BIGBANK",
+      "label": "governed_by",
+      "properties": {}
+    },
+    {
+      "id": "governed_by:SLA-OZMINE-GOLD→VPN-OZMINE",
+      "source": "SLA-OZMINE-GOLD",
+      "target": "VPN-OZMINE",
+      "label": "governed_by",
+      "properties": {}
+    },
+    {
+      "id": "governed_by:SLA-BB-SYD-STANDARD→BB-BUNDLE-SYD-NORTH",
+      "source": "SLA-BB-SYD-STANDARD",
+      "target": "BB-BUNDLE-SYD-NORTH",
+      "label": "governed_by",
+      "properties": {}
+    },
+    {
+      "id": "governed_by:SLA-BB-BNE-STANDARD→BB-BUNDLE-BNE-CENTRAL",
+      "source": "SLA-BB-BNE-STANDARD",
+      "target": "BB-BUNDLE-BNE-CENTRAL",
+      "label": "governed_by",
+      "properties": {}
+    },
+    {
+      "id": "peers_over:BGP-SYD-MEL-01→CORE-SYD-01",
+      "source": "BGP-SYD-MEL-01",
+      "target": "CORE-SYD-01",
+      "label": "peers_over",
+      "properties": {
+        "ASNumber": "64512"
+      }
+    },
+    {
+      "id": "peers_over:BGP-SYD-BNE-01→CORE-SYD-01",
+      "source": "BGP-SYD-BNE-01",
+      "target": "CORE-SYD-01",
+      "label": "peers_over",
+      "properties": {
+        "ASNumber": "64512"
+      }
+    },
+    {
+      "id": "peers_over:BGP-MEL-BNE-01→CORE-MEL-01",
+      "source": "BGP-MEL-BNE-01",
+      "target": "CORE-MEL-01",
+      "label": "peers_over",
+      "properties": {
+        "ASNumber": "64513"
+      }
+    },
+    {
+      "id": "peers_over:BGP-SYD-MEL-01→CORE-MEL-01",
+      "source": "BGP-SYD-MEL-01",
+      "target": "CORE-MEL-01",
+      "label": "peers_over",
+      "properties": {
+        "ASNumber": "64513"
+      }
+    },
+    {
+      "id": "peers_over:BGP-SYD-BNE-01→CORE-BNE-01",
+      "source": "BGP-SYD-BNE-01",
+      "target": "CORE-BNE-01",
+      "label": "peers_over",
+      "properties": {
+        "ASNumber": "64514"
+      }
+    },
+    {
+      "id": "peers_over:BGP-MEL-BNE-01→CORE-BNE-01",
+      "source": "BGP-MEL-BNE-01",
+      "target": "CORE-BNE-01",
+      "label": "peers_over",
+      "properties": {
+        "ASNumber": "64514"
+      }
+    },
+    {
+      "id": "routed_through:LINK-SYD-MEL-FIBRE-01→CONDUIT-SYD-MEL-INLAND",
+      "source": "LINK-SYD-MEL-FIBRE-01",
+      "target": "CONDUIT-SYD-MEL-INLAND",
+      "label": "routed_through",
+      "properties": {
+        "SegmentDescription": "Primary SYD-MEL fibre routed through inland conduit via Goulburn"
+      }
+    },
+    {
+      "id": "routed_through:LINK-SYD-MEL-FIBRE-02→CONDUIT-SYD-MEL-INLAND",
+      "source": "LINK-SYD-MEL-FIBRE-02",
+      "target": "CONDUIT-SYD-MEL-INLAND",
+      "label": "routed_through",
+      "properties": {
+        "SegmentDescription": "Backup SYD-MEL fibre routed through SAME inland conduit — shared risk"
+      }
+    },
+    {
+      "id": "routed_through:LINK-SYD-BNE-FIBRE-01→CONDUIT-SYD-BNE-PACIFIC",
+      "source": "LINK-SYD-BNE-FIBRE-01",
+      "target": "CONDUIT-SYD-BNE-PACIFIC",
+      "label": "routed_through",
+      "properties": {
+        "SegmentDescription": "SYD-BNE fibre routed through Pacific Highway coastal conduit"
+      }
+    },
+    {
+      "id": "routed_through:LINK-MEL-BNE-FIBRE-01→CONDUIT-SYD-MEL-COASTAL",
+      "source": "LINK-MEL-BNE-FIBRE-01",
+      "target": "CONDUIT-SYD-MEL-COASTAL",
+      "label": "routed_through",
+      "properties": {
+        "SegmentDescription": "MEL-BNE fibre routed through coastal conduit (partial overlap)"
+      }
+    },
+    {
+      "id": "amplifies:AMP-SYD-MEL-GOULBURN→LINK-SYD-MEL-FIBRE-01",
+      "source": "AMP-SYD-MEL-GOULBURN",
+      "target": "LINK-SYD-MEL-FIBRE-01",
+      "label": "amplifies",
+      "properties": {
+        "HopOrder": "1"
+      }
+    },
+    {
+      "id": "amplifies:AMP-SYD-MEL-ALBURY→LINK-SYD-MEL-FIBRE-01",
+      "source": "AMP-SYD-MEL-ALBURY",
+      "target": "LINK-SYD-MEL-FIBRE-01",
+      "label": "amplifies",
+      "properties": {
+        "HopOrder": "2"
+      }
+    },
+    {
+      "id": "amplifies:AMP-SYD-MEL-GOULBURN→LINK-SYD-MEL-FIBRE-02",
+      "source": "AMP-SYD-MEL-GOULBURN",
+      "target": "LINK-SYD-MEL-FIBRE-02",
+      "label": "amplifies",
+      "properties": {
+        "HopOrder": "1"
+      }
+    },
+    {
+      "id": "amplifies:AMP-SYD-MEL-ALBURY→LINK-SYD-MEL-FIBRE-02",
+      "source": "AMP-SYD-MEL-ALBURY",
+      "target": "LINK-SYD-MEL-FIBRE-02",
+      "label": "amplifies",
+      "properties": {
+        "HopOrder": "2"
+      }
+    },
+    {
+      "id": "amplifies:AMP-SYD-BNE-COFFS→LINK-SYD-BNE-FIBRE-01",
+      "source": "AMP-SYD-BNE-COFFS",
+      "target": "LINK-SYD-BNE-FIBRE-01",
+      "label": "amplifies",
+      "properties": {
+        "HopOrder": "1"
+      }
+    },
+    {
+      "id": "amplifies:AMP-MEL-BNE-GRAFTON→LINK-MEL-BNE-FIBRE-01",
+      "source": "AMP-MEL-BNE-GRAFTON",
+      "target": "LINK-MEL-BNE-FIBRE-01",
+      "label": "amplifies",
+      "properties": {
+        "HopOrder": "1"
+      }
+    },
+    {
+      "id": "affects_version:ADV-CISCO-2025-001→CORE-SYD-01",
+      "source": "ADV-CISCO-2025-001",
+      "target": "CORE-SYD-01",
+      "label": "affects_version",
+      "properties": {
+        "MatchReason": "Router runs IOS-XR-7.9.2 which matches affected version IOS-XR-7.9.2"
+      }
+    },
+    {
+      "id": "affects_version:ADV-CISCO-2025-001→CORE-MEL-01",
+      "source": "ADV-CISCO-2025-001",
+      "target": "CORE-MEL-01",
+      "label": "affects_version",
+      "properties": {
+        "MatchReason": "Router runs IOS-XR-7.9.2 which matches affected version IOS-XR-7.9.2"
+      }
+    },
+    {
+      "id": "affects_version:ADV-CISCO-2025-002→CORE-SYD-01",
+      "source": "ADV-CISCO-2025-002",
+      "target": "CORE-SYD-01",
+      "label": "affects_version",
+      "properties": {
+        "MatchReason": "Router runs IOS-XR-7.9.2 which matches affected version IOS-XR-7.9.2"
+      }
+    },
+    {
+      "id": "affects_version:ADV-CISCO-2025-002→CORE-MEL-01",
+      "source": "ADV-CISCO-2025-002",
+      "target": "CORE-MEL-01",
+      "label": "affects_version",
+      "properties": {
+        "MatchReason": "Router runs IOS-XR-7.9.2 which matches affected version IOS-XR-7.9.2"
+      }
+    },
+    {
+      "id": "affects_version:ADV-JUNIPER-2025-001→CORE-BNE-01",
+      "source": "ADV-JUNIPER-2025-001",
+      "target": "CORE-BNE-01",
+      "label": "affects_version",
+      "properties": {
+        "MatchReason": "Router runs JUNOS-23.4R1 which matches affected version JUNOS-23.4R1"
+      }
+    },
+    {
+      "id": "monitors:SENS-SYD-MEL-F1-OPT-001→LINK-SYD-MEL-FIBRE-01",
+      "source": "SENS-SYD-MEL-F1-OPT-001",
+      "target": "LINK-SYD-MEL-FIBRE-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-SYD-MEL-F1-OPT-002→LINK-SYD-MEL-FIBRE-01",
+      "source": "SENS-SYD-MEL-F1-OPT-002",
+      "target": "LINK-SYD-MEL-FIBRE-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-SYD-MEL-F1-OPT-003→LINK-SYD-MEL-FIBRE-01",
+      "source": "SENS-SYD-MEL-F1-OPT-003",
+      "target": "LINK-SYD-MEL-FIBRE-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-SYD-MEL-F1-BER-001→LINK-SYD-MEL-FIBRE-01",
+      "source": "SENS-SYD-MEL-F1-BER-001",
+      "target": "LINK-SYD-MEL-FIBRE-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-SYD-MEL-F1-BER-002→LINK-SYD-MEL-FIBRE-01",
+      "source": "SENS-SYD-MEL-F1-BER-002",
+      "target": "LINK-SYD-MEL-FIBRE-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-SYD-MEL-F2-OPT-001→LINK-SYD-MEL-FIBRE-02",
+      "source": "SENS-SYD-MEL-F2-OPT-001",
+      "target": "LINK-SYD-MEL-FIBRE-02",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-SYD-MEL-F2-OPT-002→LINK-SYD-MEL-FIBRE-02",
+      "source": "SENS-SYD-MEL-F2-OPT-002",
+      "target": "LINK-SYD-MEL-FIBRE-02",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-SYD-BNE-F1-OPT-001→LINK-SYD-BNE-FIBRE-01",
+      "source": "SENS-SYD-BNE-F1-OPT-001",
+      "target": "LINK-SYD-BNE-FIBRE-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-SYD-BNE-F1-OPT-002→LINK-SYD-BNE-FIBRE-01",
+      "source": "SENS-SYD-BNE-F1-OPT-002",
+      "target": "LINK-SYD-BNE-FIBRE-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-MEL-BNE-F1-OPT-001→LINK-MEL-BNE-FIBRE-01",
+      "source": "SENS-MEL-BNE-F1-OPT-001",
+      "target": "LINK-MEL-BNE-FIBRE-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-MEL-BNE-F1-OPT-002→LINK-MEL-BNE-FIBRE-01",
+      "source": "SENS-MEL-BNE-F1-OPT-002",
+      "target": "LINK-MEL-BNE-FIBRE-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-CORE-SYD-01-TEMP-001→CORE-SYD-01",
+      "source": "SENS-CORE-SYD-01-TEMP-001",
+      "target": "CORE-SYD-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-CORE-SYD-01-CPU-001→CORE-SYD-01",
+      "source": "SENS-CORE-SYD-01-CPU-001",
+      "target": "CORE-SYD-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-CORE-MEL-01-TEMP-001→CORE-MEL-01",
+      "source": "SENS-CORE-MEL-01-TEMP-001",
+      "target": "CORE-MEL-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-CORE-MEL-01-CPU-001→CORE-MEL-01",
+      "source": "SENS-CORE-MEL-01-CPU-001",
+      "target": "CORE-MEL-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "monitors:SENS-CORE-BNE-01-TEMP-001→CORE-BNE-01",
+      "source": "SENS-CORE-BNE-01-TEMP-001",
+      "target": "CORE-BNE-01",
+      "label": "monitors",
+      "properties": {}
+    },
+    {
+      "id": "stationed_at:DUTY-SYD-2026-02-20-DAY→DEPOT-SYD-CAMPBELLTOWN",
+      "source": "DUTY-SYD-2026-02-20-DAY",
+      "target": "DEPOT-SYD-CAMPBELLTOWN",
+      "label": "stationed_at",
+      "properties": {}
+    },
+    {
+      "id": "stationed_at:DUTY-SYD-2026-02-20-NIGHT→DEPOT-SYD-CAMPBELLTOWN",
+      "source": "DUTY-SYD-2026-02-20-NIGHT",
+      "target": "DEPOT-SYD-CAMPBELLTOWN",
+      "label": "stationed_at",
+      "properties": {}
+    },
+    {
+      "id": "stationed_at:DUTY-MEL-2026-02-20-DAY→DEPOT-MEL-CLAYTON",
+      "source": "DUTY-MEL-2026-02-20-DAY",
+      "target": "DEPOT-MEL-CLAYTON",
+      "label": "stationed_at",
+      "properties": {}
+    },
+    {
+      "id": "stationed_at:DUTY-MEL-2026-02-20-NIGHT→DEPOT-MEL-CLAYTON",
+      "source": "DUTY-MEL-2026-02-20-NIGHT",
+      "target": "DEPOT-MEL-CLAYTON",
+      "label": "stationed_at",
+      "properties": {}
+    },
+    {
+      "id": "stationed_at:DUTY-BNE-2026-02-20-DAY→DEPOT-BNE-EAGLEFARM",
+      "source": "DUTY-BNE-2026-02-20-DAY",
+      "target": "DEPOT-BNE-EAGLEFARM",
+      "label": "stationed_at",
+      "properties": {}
+    },
+    {
+      "id": "stationed_at:DUTY-REGIONAL-SYD-MEL-2026-02-20→DEPOT-GOULBURN",
+      "source": "DUTY-REGIONAL-SYD-MEL-2026-02-20",
+      "target": "DEPOT-GOULBURN",
+      "label": "stationed_at",
+      "properties": {}
+    },
+    {
+      "id": "stationed_at:DUTY-REGIONAL-SYD-MEL-2026-02-20-SOUTH→DEPOT-ALBURY",
+      "source": "DUTY-REGIONAL-SYD-MEL-2026-02-20-SOUTH",
+      "target": "DEPOT-ALBURY",
+      "label": "stationed_at",
+      "properties": {}
+    },
+    {
+      "id": "stationed_at:DUTY-REGIONAL-SYD-BNE-2026-02-20→DEPOT-COFFS",
+      "source": "DUTY-REGIONAL-SYD-BNE-2026-02-20",
+      "target": "DEPOT-COFFS",
+      "label": "stationed_at",
+      "properties": {}
+    },
+    {
+      "id": "services:DEPOT-SYD-CAMPBELLTOWN→CORE-SYD-01",
+      "source": "DEPOT-SYD-CAMPBELLTOWN",
+      "target": "CORE-SYD-01",
+      "label": "services",
+      "properties": {}
+    },
+    {
+      "id": "services:DEPOT-MEL-CLAYTON→CORE-MEL-01",
+      "source": "DEPOT-MEL-CLAYTON",
+      "target": "CORE-MEL-01",
+      "label": "services",
+      "properties": {}
+    },
+    {
+      "id": "services:DEPOT-BNE-EAGLEFARM→CORE-BNE-01",
+      "source": "DEPOT-BNE-EAGLEFARM",
+      "target": "CORE-BNE-01",
+      "label": "services",
+      "properties": {}
+    },
+    {
+      "id": "services:DEPOT-GOULBURN→AMP-SYD-MEL-GOULBURN",
+      "source": "DEPOT-GOULBURN",
+      "target": "AMP-SYD-MEL-GOULBURN",
+      "label": "services",
+      "properties": {}
+    },
+    {
+      "id": "services:DEPOT-ALBURY→AMP-SYD-MEL-ALBURY",
+      "source": "DEPOT-ALBURY",
+      "target": "AMP-SYD-MEL-ALBURY",
+      "label": "services",
+      "properties": {}
+    },
+    {
+      "id": "services:DEPOT-COFFS→AMP-SYD-BNE-COFFS",
+      "source": "DEPOT-COFFS",
+      "target": "AMP-SYD-BNE-COFFS",
+      "label": "services",
+      "properties": {}
+    }
+  ]
+}

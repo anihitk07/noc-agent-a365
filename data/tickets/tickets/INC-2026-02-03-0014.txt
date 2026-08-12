@@ -1,0 +1,38 @@
+Incident: INC-2026-02-03-0014
+Title: Near-miss conduit excavation damage near Campbelltown - CONDUIT-SYD-MEL-INLAND
+Severity: P3
+Root Cause: CONDUIT-SYD-MEL-INLAND
+Root Cause Type: EXCAVATION_NEAR_MISS
+Telemetry Signature:
+  SENS-SYD-MEL-F1-OPT-001 (Campbelltown, 45km): -10.4 dBm → -10.4 dBm (STABLE throughout)
+  SENS-SYD-MEL-F1-OPT-002 (Goulburn, 195km): -11.1 dBm → -11.1 dBm (STABLE throughout)
+  SENS-SYD-MEL-F1-OPT-003 (near Albury, 460km): -10.7 dBm → -10.7 dBm (STABLE throughout)
+  LINK-SYD-MEL-FIBRE-01 BER: 2.0e-12 (nominal — no change)
+  LINK-SYD-MEL-FIBRE-01 Utilization: 57% (nominal — no change)
+  GPS coordinates of excavation: -34.0650, 150.8140 (within 15m of SENS-SYD-MEL-F1-OPT-001)
+  All SYD-MEL optical readings: NO ANOMALIES DETECTED at any point during incident window
+Created: 2026-02-03T10:45:00Z
+Resolved: 2026-02-03T16:30:00Z
+SLA Breached: No
+
+Description:
+Council roadworks contractor struck CONDUIT-SYD-MEL-INLAND with a mechanical excavator near Campbelltown at GPS -34.0650, 150.8140. The excavator bucket scuffed the outer conduit sheath but did not breach the inner duct or damage any fibre strands. A field inspector was dispatched within 90 minutes and confirmed superficial scuffing only — no fibre damage, no signal degradation, no service impact. All optical telemetry on LINK-SYD-MEL-FIBRE-01 remained completely stable throughout the incident window.
+
+Detection Method:
+Third-party notification — council works supervisor called the infrastructure hotline after the excavator operator reported hitting a marked conduit. No network-side alerts were generated because no optical or electrical fault occurred.
+
+Resolution:
+Field inspection team dispatched at 12:15. Inspector arrived at 13:45 and confirmed conduit outer sheath scuffing (approx. 30cm x 5cm area). Inner duct intact, all fibre strands verified undamaged via visual inspection and OTDR trace. Conduit repair sleeve installed as preventive measure. Contractor issued a near-miss report. No customer impact, no service interruption, no rerouting required.
+
+Customer Impact:
+None
+
+Services Affected: 0
+Alerts Generated: 0
+Alerts Suppressed: 0
+Time to Detect: N/A (externally reported, no network fault)
+Time to Reroute: N/A
+Time to Resolve: 345 minutes
+
+Lessons Learned:
+Near-miss excavation events must be documented even when no fibre damage occurs — they establish a pattern of risk at specific geographic locations. The GPS coordinates (-34.0650, 150.8140) are within 15m of sensor SENS-SYD-MEL-F1-OPT-001 and should be flagged in the GIS system as a repeat-risk zone. Critical distinction from actual fibre cuts: all optical telemetry remained completely normal throughout. This is a NEAR-MISS, not a fault event.

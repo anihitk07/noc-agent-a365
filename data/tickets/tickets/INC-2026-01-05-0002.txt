@@ -1,0 +1,36 @@
+Incident: INC-2026-01-05-0002
+Title: Firmware upgrade on CORE-MEL-01 - successful
+Severity: P4
+Root Cause: CORE-MEL-01
+Root Cause Type: PLANNED_MAINTENANCE
+Telemetry Signature:
+  CORE-MEL-01 IOS-XR version: 7.9.1 → 7.11.2 (upgrade during maintenance window)
+  CORE-MEL-01 BER on all interfaces: 1.7e-12 pre-upgrade → 1.8e-12 post-upgrade (nominal, no change)
+  CORE-MEL-01 CPU: 14% pre → 16% post (within normal variance)
+  CORE-MEL-01 uptime: reset to 0 at 03:00:00 (planned reboot)
+  All customer services: unaffected (traffic pre-rerouted via CORE-MEL-02)
+Created: 2026-01-05T03:00:00Z
+Resolved: 2026-01-05T04:15:00Z
+SLA Breached: No
+
+Description:
+Scheduled firmware upgrade on CORE-MEL-01 from IOS-XR 7.9.1 to 7.11.2. Traffic pre-rerouted to CORE-MEL-02 before maintenance. Upgrade completed in 75 minutes. Post-upgrade BER and performance metrics confirmed nominal. Zero customer impact.
+
+Detection Method:
+Change management system — planned event (CHG-2026-0003)
+
+Resolution:
+Firmware upgrade completed per runbook. All post-upgrade validation checks passed. Traffic restored to dual-router operation.
+
+Customer Impact:
+None
+
+Services Affected: 0
+Alerts Generated: 2
+Alerts Suppressed: 2
+Time to Detect: 0 seconds
+Time to Reroute: 0 seconds
+Time to Resolve: 75 minutes
+
+Lessons Learned:
+Pre-rerouting traffic before firmware upgrades eliminates customer impact. Post-upgrade BER validation confirms no hardware regression from new firmware.

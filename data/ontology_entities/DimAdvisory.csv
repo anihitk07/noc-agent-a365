@@ -1,0 +1,4 @@
+AdvisoryId,VendorName,BugId,AffectedVersions,Severity,Title,Description
+ADV-CISCO-2025-001,Cisco,CSCwi82345,IOS-XR-7.9.1|IOS-XR-7.9.2,HIGH,OSPF adjacency flap under high BGP churn,OSPF adjacency may drop when BGP table exceeds 500K prefixes during reconvergence. Affects ASR-9000 series running IOS-XR 7.9.x. Fixed in IOS-XR-7.10.1.
+ADV-CISCO-2025-002,Cisco,CSCwi93456,IOS-XR-7.8.1|IOS-XR-7.9.1|IOS-XR-7.9.2,MEDIUM,BFD session timeout false positive on 100GE interfaces,BFD may report false link-down on 100GE interfaces under high utilisation (>90%). Affects ASR-9000 series. Workaround: increase BFD interval to 300ms.
+ADV-JUNIPER-2025-001,Juniper,PR1789012,JUNOS-23.4R1|JUNOS-23.4R2,HIGH,MPLS LDP session reset during ECMP rebalancing,LDP sessions may reset when ECMP path count changes from 2 to 1 during link failure. Affects MX10000 series. Fixed in JUNOS-24.1R1.

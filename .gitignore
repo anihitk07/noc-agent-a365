@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.venv-setup/
+
+# Node (if any tooling ever adds a frontend)
+node_modules/
+
+# Environment
+.env
+agent/.env
+
+# A365 CLI generated files (tenant/subscription-specific, never committed)
+a365.config.json
+a365.generated.config.json
+agent/ToolingManifest.json
+manifest/
+
+# Azure
+.azure/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Misc build/publish artifacts
+publish/
+app.zip
+*.zip
+*.pyc
+logs/

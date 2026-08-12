@@ -1,0 +1,37 @@
+Incident: INC-2025-11-05-0031
+Title: Power outage AGG-SYD-NORTH-01 - UPS failure
+Severity: P1
+Root Cause: AGG-SYD-NORTH-01
+Root Cause Type: POWER_FAILURE
+Telemetry Signature:
+  AGG-SYD-NORTH-01 power input: 230V → 0V at 06:12:03 (UPS battery failure)
+  AGG-SYD-NORTH-01 uptime: reset to 0 at 06:12:03
+  Generator cut-in at 06:20:01 (8 min gap)
+  Downstream stations MOB-5G-SYD-2041, MOB-5G-SYD-2042: UNREACHABLE for 8 min
+Created: 2025-11-05T06:12:00Z
+Resolved: 2025-11-05T06:20:00Z
+SLA Breached: No
+
+Description:
+UPS battery failure at Sydney North aggregation site. Switch lost power for 8 minutes before generator kicked in. All downstream base stations lost backhaul.
+
+Detection Method:
+Automated alert storm detection — correlated with power monitoring
+
+Resolution:
+Generator provided interim power. UPS battery replaced within 2 hours. No lasting impact.
+
+Customer Impact:
+- BB-BUNDLE-SYD-NORTH
+- MOB-5G-SYD-2041
+- MOB-5G-SYD-2042
+
+Services Affected: 3
+Alerts Generated: 892
+Alerts Suppressed: 891
+Time to Detect: 5 seconds
+Time to Reroute: 0 seconds
+Time to Resolve: 8 minutes
+
+Lessons Learned:
+UPS battery age exceeded manufacturer recommendation. Implement proactive UPS health monitoring. Add battery age to ontology as a property on AggSwitch entity.

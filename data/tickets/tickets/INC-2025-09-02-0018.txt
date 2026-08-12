@@ -1,0 +1,35 @@
+Incident: INC-2025-09-02-0018
+Title: DWDM amplifier failure MEL-BNE link
+Severity: P1
+Root Cause: LINK-MEL-BNE-FIBRE-01
+Root Cause Type: AMPLIFIER_FAILURE
+Telemetry Signature:
+  SENS-MEL-BNE-F1-OPT-001 (Albury, 310km): -12.1 dBm → -18.4 dBm → -34.2 dBm (progressive decline over 15 min)
+  LINK-MEL-BNE-FIBRE-01 BER: 3.2e-12 → 4.7e-6 (pre-failure degradation)
+  LINK-MEL-BNE-FIBRE-01 Utilization: 45% → 0%
+  EDFA-ALBURY-01 pump laser current: 320mA → 480mA (overdriven before failure)
+Created: 2025-09-02T11:45:00Z
+Resolved: 2025-09-02T15:45:00Z
+SLA Breached: No
+
+Description:
+Erbium-doped fibre amplifier (EDFA) failure at Albury repeater site. Gradual signal degradation over 15 minutes before complete loss.
+
+Detection Method:
+Anomaly detection on optical power time-series
+
+Resolution:
+Spare EDFA module swapped by field team. Link restored after 4 hours.
+
+Customer Impact:
+- BB-BUNDLE-MEL-EAST
+
+Services Affected: 1
+Alerts Generated: 423
+Alerts Suppressed: 422
+Time to Detect: 120 seconds
+Time to Reroute: 90 seconds
+Time to Resolve: 240 minutes
+
+Lessons Learned:
+Pre-positioned spare amplifier modules at major repeater sites. Optical power degradation trend was detectable 10 minutes before failure — consider proactive alerting.

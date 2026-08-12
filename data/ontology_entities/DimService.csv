@@ -1,0 +1,11 @@
+ServiceId,ServiceType,CustomerName,CustomerCount,ActiveUsers
+VPN-ACME-CORP,EnterpriseVPN,ACME Corporation,1,450
+VPN-BIGBANK,EnterpriseVPN,BigBank Financial,1,1200
+VPN-OZMINE,EnterpriseVPN,OzMine Resources,1,680
+BB-BUNDLE-SYD-NORTH,Broadband,Residential - Sydney North,3200,3200
+BB-BUNDLE-MEL-EAST,Broadband,Residential - Melbourne East,2800,2800
+BB-BUNDLE-BNE-CENTRAL,Broadband,Residential - Brisbane Central,2400,2400
+MOB-5G-SYD-2041,Mobile5G,Mobile Subscribers - SYD 2041,4200,4200
+MOB-5G-SYD-2042,Mobile5G,Mobile Subscribers - SYD 2042,4300,4300
+MOB-5G-MEL-3011,Mobile5G,Mobile Subscribers - MEL 3011,3800,3800
+MOB-5G-BNE-4011,Mobile5G,Mobile Subscribers - BNE 4011,3600,3600

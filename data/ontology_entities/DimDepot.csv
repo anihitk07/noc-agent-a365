@@ -1,0 +1,7 @@
+DepotId,DepotName,City,Region,DepotType,Latitude,Longitude,ServicedEntityId,ServicedEntityType
+DEPOT-SYD-CAMPBELLTOWN,Campbelltown Depot,Sydney,NSW,CityHub,-34.0650,150.8140,CORE-SYD-01,CoreRouter
+DEPOT-MEL-CLAYTON,Clayton Depot,Melbourne,VIC,CityHub,-37.9250,145.1200,CORE-MEL-01,CoreRouter
+DEPOT-BNE-EAGLEFARM,Eagle Farm Depot,Brisbane,QLD,CityHub,-27.4380,153.0780,CORE-BNE-01,CoreRouter
+DEPOT-GOULBURN,Goulburn Regional Depot,Goulburn,NSW,RegionalDepot,-34.7546,149.7186,AMP-SYD-MEL-GOULBURN,AmplifierSite
+DEPOT-ALBURY,Albury Regional Depot,Albury,NSW,RegionalDepot,-36.0737,146.9135,AMP-SYD-MEL-ALBURY,AmplifierSite
+DEPOT-COFFS,Coffs Harbour Regional Depot,Coffs Harbour,NSW,RegionalDepot,-30.2963,153.1157,AMP-SYD-BNE-COFFS,AmplifierSite

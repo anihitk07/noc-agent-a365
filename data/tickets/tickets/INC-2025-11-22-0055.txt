@@ -1,0 +1,48 @@
+Incident: INC-2025-11-22-0055
+Title: Fibre cut SYD-MEL corridor - storm damage
+Severity: P1
+Root Cause: LINK-SYD-MEL-FIBRE-01
+Root Cause Type: FIBRE_CUT
+Telemetry Signature:
+  SENS-SYD-MEL-F1-OPT-001 (Campbelltown, 45km): -10.5 dBm → -10.3 dBm (STABLE — not affected)
+  SENS-SYD-MEL-F1-OPT-002 (Goulburn, 195km): -11.2 dBm → -32.1 dBm (LOSS OF LIGHT at 09:14:22)
+  SENS-SYD-MEL-F1-OPT-003 (near Albury, 460km): -10.8 dBm → -31.7 dBm (LOSS OF LIGHT at 09:14:22)
+  LINK-SYD-MEL-FIBRE-01 BER: 2.1e-12 → 1.0 (total errors)
+  LINK-SYD-MEL-FIBRE-01 Utilization: 62% → 0%
+  Alert Storm: 34 correlated alerts within 2 seconds
+    - 8x SERVICE_DEGRADATION (CRITICAL) — VPN-ACME-CORP, VPN-BIGBANK
+    - 12x SERVICE_DEGRADATION (MAJOR) — broadband bundles
+    - 14x SERVICE_DEGRADATION (WARNING) — mobile backhaul
+
+SLA Impact:
+  VPN-ACME-CORP: 8.5 hours at $50,000/hr = $425,000 penalty exposure
+  VPN-BIGBANK: 8.5 hours at $25,000/hr = $212,500 penalty exposure
+  (Penalties waived under force majeure clause — third-party excavation damage)
+Created: 2025-11-22T14:05:00Z
+Resolved: 2025-11-23T08:05:00Z
+SLA Breached: Yes
+
+Description:
+Severe thunderstorm caused tree fall on aerial fibre section near Goulburn. Both FIBRE-01 and FIBRE-02 impacted (same conduit route). No alternate direct path available.
+
+Detection Method:
+Automated alert storm detection
+
+Resolution:
+Emergency traffic rerouted via SYD-BNE-MEL indirect path (higher latency). Physical repair took 18 hours due to access issues.
+
+Customer Impact:
+- VPN-ACME-CORP
+- VPN-BIGBANK
+- BB-BUNDLE-SYD-NORTH
+- BB-BUNDLE-MEL-EAST
+
+Services Affected: 4
+Alerts Generated: 3241
+Alerts Suppressed: 3239
+Time to Detect: 6 seconds
+Time to Reroute: 180 seconds
+Time to Resolve: 1080 minutes
+
+Lessons Learned:
+Both SYD-MEL fibre pairs share a common conduit for 12km near Goulburn. Diversely routed third path required for true redundancy. REDUNDANT_PAIR relationship in ontology should include route-diversity metadata.

@@ -1,0 +1,35 @@
+Incident: INC-2025-09-10-0022
+Title: False alarm from faulty temperature sensor on CORE-SYD-01
+Severity: P4
+Root Cause: SENS-CORE-SYD-01-TEMP-001
+Root Cause Type: SENSOR_FAULT
+Telemetry Signature:
+  SENS-CORE-SYD-01-TEMP-001: 32°C → 85°C (spurious reading — sensor fault)
+  SENS-CORE-SYD-01-TEMP-002 (redundant): 32°C → 32°C (STABLE — confirms false alarm)
+  CORE-SYD-01 CPU: 19% (normal), all interfaces: UP
+  HVAC system inlet temp: 21°C (nominal)
+Created: 2025-09-10T15:42:00Z
+Resolved: 2025-09-10T16:30:00Z
+SLA Breached: No
+
+Description:
+SENS-CORE-SYD-01-TEMP-001 reported 85°C on CORE-SYD-01 chassis, triggering a thermal shutdown warning. Redundant temperature sensor SENS-CORE-SYD-01-TEMP-002 and HVAC monitoring confirmed actual temperature was 32°C. Sensor replaced during next maintenance window.
+
+Detection Method:
+Automated thermal alert (>80°C threshold on chassis sensor)
+
+Resolution:
+Alert acknowledged as false alarm after cross-referencing redundant sensor. Faulty sensor SENS-CORE-SYD-01-TEMP-001 flagged for replacement. No operational action taken.
+
+Customer Impact:
+None
+
+Services Affected: 0
+Alerts Generated: 1
+Alerts Suppressed: 0
+Time to Detect: 10 seconds
+Time to Reroute: N/A
+Time to Resolve: 48 minutes
+
+Lessons Learned:
+Always cross-reference redundant sensors before triggering thermal escalation procedures. Add automated sensor-disagreement logic to suppress false thermal alarms when redundant readings diverge by >20°C.

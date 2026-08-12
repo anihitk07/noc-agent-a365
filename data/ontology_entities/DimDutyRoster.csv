@@ -1,0 +1,9 @@
+RosterId,PersonName,Email,Phone,City,Region,ShiftStart,ShiftEnd,Role,HomeBase,VehicleId,DepotId
+DUTY-SYD-2026-02-20-DAY,Marcus Chen,marcus.chen@austtelco.com.au,+61-412-555-101,Sydney,NSW,2026-02-20T06:00:00Z,2026-02-20T18:00:00Z,FieldEngineer,Campbelltown Depot -34.0650 150.8140,VEH-SYD-03,DEPOT-SYD-CAMPBELLTOWN
+DUTY-SYD-2026-02-20-NIGHT,Sarah O'Brien,sarah.obrien@austtelco.com.au,+61-412-555-102,Sydney,NSW,2026-02-20T18:00:00Z,2026-02-21T06:00:00Z,FieldEngineer,Parramatta Depot -33.8150 151.0010,VEH-SYD-07,DEPOT-SYD-CAMPBELLTOWN
+DUTY-MEL-2026-02-20-DAY,James Nguyen,james.nguyen@austtelco.com.au,+61-412-555-201,Melbourne,VIC,2026-02-20T06:00:00Z,2026-02-20T18:00:00Z,FieldEngineer,Clayton Depot -37.9250 145.1200,VEH-MEL-02,DEPOT-MEL-CLAYTON
+DUTY-MEL-2026-02-20-NIGHT,Priya Sharma,priya.sharma@austtelco.com.au,+61-412-555-202,Melbourne,VIC,2026-02-20T18:00:00Z,2026-02-21T06:00:00Z,FieldEngineer,Footscray Depot -37.7990 144.8990,VEH-MEL-05,DEPOT-MEL-CLAYTON
+DUTY-BNE-2026-02-20-DAY,Tom Williams,tom.williams@austtelco.com.au,+61-412-555-301,Brisbane,QLD,2026-02-20T06:00:00Z,2026-02-20T18:00:00Z,FieldEngineer,Eagle Farm Depot -27.4380 153.0780,VEH-BNE-01,DEPOT-BNE-EAGLEFARM
+DUTY-REGIONAL-SYD-MEL-2026-02-20,Dave Mitchell,dave.mitchell@austtelco.com.au,+61-412-555-401,Goulburn,NSW,2026-02-20T06:00:00Z,2026-02-20T18:00:00Z,RegionalFieldEngineer,Goulburn Office -34.7546 149.7186,VEH-REG-02,DEPOT-GOULBURN
+DUTY-REGIONAL-SYD-MEL-2026-02-20-SOUTH,Karen Lee,karen.lee@austtelco.com.au,+61-412-555-402,Albury,NSW,2026-02-20T06:00:00Z,2026-02-20T18:00:00Z,RegionalFieldEngineer,Albury Office -36.0737 146.9135,VEH-REG-04,DEPOT-ALBURY
+DUTY-REGIONAL-SYD-BNE-2026-02-20,Paul Jacobs,paul.jacobs@austtelco.com.au,+61-412-555-501,Coffs Harbour,NSW,2026-02-20T06:00:00Z,2026-02-20T18:00:00Z,RegionalFieldEngineer,Coffs Harbour Office -30.2963 153.1157,VEH-REG-06,DEPOT-COFFS
