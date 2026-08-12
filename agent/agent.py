@@ -158,8 +158,18 @@ class _StaticTokenCredential(TokenCredential):
 
 
 def _get_service_credential():
-    """Return the app-level (non-user) credential used for Foundry IQ + the model."""
-    if "FOUNDRY_HOSTING_ENVIRONMENT" in os.environ:
+    """Return the app-level (non-user) credential used for Foundry IQ + the model.
+
+    WEBSITE_INSTANCE_ID is set by the Azure App Service platform itself (Linux
+    and Windows, all SKUs) and is the standard way to detect "running inside App
+    Service" -- unlike the previous FOUNDRY_HOSTING_ENVIRONMENT check, which was
+    never actually set by anything in this repo's infra and caused the deployed
+    container to fall through to AzureDeveloperCliCredential, which shells out to
+    the `azd` binary. That binary doesn't exist in the App Service container, so
+    every credential.get_token() call failed with
+    `CredentialUnavailableError: Azure Developer CLI could not be found.`
+    """
+    if "WEBSITE_INSTANCE_ID" in os.environ:
         return ManagedIdentityCredential()
     return AzureDeveloperCliCredential(tenant_id=AZURE_TENANT_ID, process_timeout=60)
 

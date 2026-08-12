@@ -85,6 +85,29 @@ def log_message(message: str):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}")
 
 
+def _wait_for_extractor_result(extractor, timeout_seconds: int = 180, poll_seconds: float = 2.0):
+    """Block until an _LROResultExtractor (the ontology-preview SDK's
+    begin_create_ontology/begin_update_ontology_definition return type) has a
+    populated `.result` property.
+
+    Unlike a normal azure-core LROPoller, _LROResultExtractor has no blocking
+    `.result()` method -- it is populated asynchronously via
+    `poller.add_done_callback(extractor)`, so we must poll the `.result`
+    property ourselves until the underlying poller's callback has fired.
+    """
+    import time
+
+    elapsed = 0.0
+    while extractor.result is None and elapsed < timeout_seconds:
+        time.sleep(poll_seconds)
+        elapsed += poll_seconds
+    if extractor.result is None:
+        raise TimeoutError(
+            f"Timed out after {timeout_seconds}s waiting for ontology long-running operation to complete."
+        )
+    return extractor.result
+
+
 def update_root_env(values: dict):
     env_path = REPO_ROOT / ".env"
     for key, val in values.items():
@@ -233,6 +256,7 @@ def make_entity_parts(entity_id, entity_name, table_name, columns, key_property,
 
     property_ids = {prop["name"]: prop["id"] for prop in properties}
     definition = {
+        "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/entityType/1.0.0/schema.json",
         "id": str(entity_id),
         "namespace": "usertypes",
         "baseEntityTypeId": None,
@@ -246,6 +270,7 @@ def make_entity_parts(entity_id, entity_name, table_name, columns, key_property,
     }
     binding_id = str(uuid.uuid4())
     binding = {
+        "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
         "id": binding_id,
         "dataBindingConfiguration": {
             "dataBindingType": "NonTimeSeries",
@@ -269,6 +294,7 @@ def make_relationship_parts(relationship_id, relationship_name, source_entity_id
                              target_entity_id, target_column, target_property_id, table_name, workspace_id, lakehouse_id):
     """Build a relationship type + its lakehouse contextualization."""
     definition = {
+        "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/relationshipType/1.0.0/schema.json",
         "namespace": "usertypes",
         "id": str(relationship_id),
         "name": relationship_name,
@@ -278,6 +304,7 @@ def make_relationship_parts(relationship_id, relationship_name, source_entity_id
     }
     contextualization_id = str(uuid.uuid4())
     contextualization = {
+        "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/contextualization/1.0.0/schema.json",
         "id": contextualization_id,
         "dataBindingTable": {
             "workspaceId": workspace_id,
@@ -303,7 +330,14 @@ def build_noc_ontology_definition(workspace_id: str, lakehouse_id: str) -> Ontol
     RetailSupplyChainOntologyModel.Ontology shape (EntityTypes + RelationshipTypes),
     scoped to what the blast-radius / shared-conduit NOC story needs.
     """
-    parts: list[OntologyDefinitionPart] = []
+    parts: list[OntologyDefinitionPart] = [
+        # Root manifest part required by the Fabric item-definition import API --
+        # matches the (empty-object) definition.json seen at the root of
+        # microsoft-iq-solution-accelerator's RetailSupplyChainOntologyModel.Ontology.
+        # Without this, import fails with "no definition.json entry in the
+        # unzipped definition parts."
+        create_definition_part("definition.json", {}),
+    ]
 
     router_parts, router_props = make_entity_parts(
         1, "CoreRouter", "DimCoreRouter",
@@ -322,7 +356,7 @@ def build_noc_ontology_definition(workspace_id: str, lakehouse_id: str) -> Ontol
         [
             {"name": "LinkId", "type": "String", "source": "LinkId"},
             {"name": "LinkType", "type": "String", "source": "LinkType"},
-            {"name": "CapacityGbps", "type": "Int64", "source": "CapacityGbps"},
+            {"name": "CapacityGbps", "type": "BigInt", "source": "CapacityGbps"},
             {"name": "SourceRouterId", "type": "String", "source": "SourceRouterId"},
             {"name": "TargetRouterId", "type": "String", "source": "TargetRouterId"},
         ],
@@ -334,7 +368,7 @@ def build_noc_ontology_definition(workspace_id: str, lakehouse_id: str) -> Ontol
             {"name": "ConduitId", "type": "String", "source": "ConduitId"},
             {"name": "RouteDescription", "type": "String", "source": "RouteDescription"},
             {"name": "MaterialType", "type": "String", "source": "MaterialType"},
-            {"name": "InstalledYear", "type": "Int64", "source": "InstalledYear"},
+            {"name": "InstalledYear", "type": "BigInt", "source": "InstalledYear"},
         ],
         "ConduitId", "ConduitId", workspace_id, lakehouse_id,
     )
@@ -343,7 +377,7 @@ def build_noc_ontology_definition(workspace_id: str, lakehouse_id: str) -> Ontol
         [
             {"name": "SiteId", "type": "String", "source": "SiteId"},
             {"name": "Location", "type": "String", "source": "Location"},
-            {"name": "InstalledYear", "type": "Int64", "source": "InstalledYear"},
+            {"name": "InstalledYear", "type": "BigInt", "source": "InstalledYear"},
             {"name": "LastCalibration", "type": "String", "source": "LastCalibration"},
         ],
         "SiteId", "SiteId", workspace_id, lakehouse_id,
@@ -354,8 +388,8 @@ def build_noc_ontology_definition(workspace_id: str, lakehouse_id: str) -> Ontol
             {"name": "ServiceId", "type": "String", "source": "ServiceId"},
             {"name": "ServiceType", "type": "String", "source": "ServiceType"},
             {"name": "CustomerName", "type": "String", "source": "CustomerName"},
-            {"name": "CustomerCount", "type": "Int64", "source": "CustomerCount"},
-            {"name": "ActiveUsers", "type": "Int64", "source": "ActiveUsers"},
+            {"name": "CustomerCount", "type": "BigInt", "source": "CustomerCount"},
+            {"name": "ActiveUsers", "type": "BigInt", "source": "ActiveUsers"},
         ],
         "ServiceId", "ServiceId", workspace_id, lakehouse_id,
     )
@@ -365,8 +399,8 @@ def build_noc_ontology_definition(workspace_id: str, lakehouse_id: str) -> Ontol
             {"name": "SLAPolicyId", "type": "String", "source": "SLAPolicyId"},
             {"name": "ServiceId", "type": "String", "source": "ServiceId"},
             {"name": "AvailabilityPct", "type": "Double", "source": "AvailabilityPct"},
-            {"name": "MaxLatencyMs", "type": "Int64", "source": "MaxLatencyMs"},
-            {"name": "PenaltyPerHourUSD", "type": "Int64", "source": "PenaltyPerHourUSD"},
+            {"name": "MaxLatencyMs", "type": "BigInt", "source": "MaxLatencyMs"},
+            {"name": "PenaltyPerHourUSD", "type": "BigInt", "source": "PenaltyPerHourUSD"},
             {"name": "Tier", "type": "String", "source": "Tier"},
         ],
         "SLAPolicyId", "SLAPolicyId", workspace_id, lakehouse_id,
@@ -436,10 +470,11 @@ def create_or_get_ontology(workspace_id: str, name: str) -> dict:
         return existing
 
     log_message(f"Creating ontology '{name}'...")
-    ontology = get_fabric_client().ontology.items.begin_create_ontology(
+    extractor = get_fabric_client().ontology.items.begin_create_ontology(
         workspace_id,
         CreateOntologyRequest(display_name=name, description="Fabric IQ ontology for the NOC network topology."),
-    ).result()
+    )
+    ontology = _wait_for_extractor_result(extractor)
     log_message(f"Ontology created: {ontology.id}")
     return {"id": ontology.id, "displayName": ontology.display_name}
 
@@ -447,12 +482,13 @@ def create_or_get_ontology(workspace_id: str, name: str) -> dict:
 def update_ontology_definition(workspace_id: str, ontology_id: str, lakehouse_id: str) -> bool:
     log_message("Updating ontology definition with NOC entity bindings...")
     try:
-        get_fabric_client().ontology.items.begin_update_ontology_definition(
+        extractor = get_fabric_client().ontology.items.begin_update_ontology_definition(
             workspace_id,
             ontology_id,
             UpdateOntologyDefinitionRequest(definition=build_noc_ontology_definition(workspace_id, lakehouse_id)),
             update_metadata=False,
-        ).result()
+        )
+        _wait_for_extractor_result(extractor)
         return True
     except HttpResponseError as error:
         log_message(f"ERROR: Failed to update ontology definition: {error}")
