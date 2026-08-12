@@ -47,6 +47,27 @@ why the architecture changed, not as active guidance for the current code.
 every app start/restart (no dedup/reuse). Acceptable for this demo; would
 accumulate garbage versions in a long-lived deployment.
 
+## Verified live: full e2e Teams turn, all 3 queried tools succeeded through the toolbox
+
+A live Sydney fibre-cut turn completed in ~66s (well inside the 180s
+watchdog) with **zero exceptions**. App Insights `dependencies` confirms
+three real MCP tool calls through the toolbox this turn, all `success=True`:
+`foundry-iq___knowledge_base_retrieve` (9.7s), `fabric-iq___DataAgent_NOCNetworkDataAgent`
+(28.6s), `web-iq___web` (0.4s). Work IQ was not invoked this turn (the model
+didn't need on-call/bridge context for this question — it remains available
+on demand). This confirms the Toolbox + `MCPStreamableHTTPTool` +
+`header_provider` OBO-passthrough design works end-to-end.
+
+One residual oddity: the model's own reply text said "the Fabric IQ network
+topology tool had a technical issue," even though the `fabric-iq` dependency
+call itself succeeded (`success=True`, no exception) in 28.6s. This means the
+underlying Fabric Data Agent (`NOCNetworkDataAgent`) returned *content*
+describing a limitation of its own (not a transport/auth failure our code can
+see) — App Insights doesn't capture MCP tool response bodies, so the exact
+wording can't be inspected further from telemetry alone. Not a bug in this
+repo's orchestration layer; if it recurs, inspect the Fabric Data Agent
+directly in the Fabric portal.
+
 ## Watchdog timeout (no exception) after the Toolbox architecture change
 
 | Symptom | Cause | Fix |
