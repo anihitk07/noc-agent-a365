@@ -210,15 +210,24 @@ and found to be **not fully automatable**:
   role that cannot be cleanly assigned to a service principal for this
   legacy catalog endpoint.
 
-**Do this instead (~30 seconds, one time):**
+**Do this instead (~30 seconds, one time) — use the dedicated Agents admin
+surface, NOT the classic Teams app catalog:**
 
-1. Go to `https://admin.microsoft.com` → **Teams apps → Manage apps** (or
-   **Agents → All agents**, depending on tenant UI version) → **Upload new
-   app** / **Upload custom app**.
-2. Upload `agent/manifest/manifest.zip`.
-3. Approve/allow it, then install it for the teammate account
-   `nocagent@M365CPI48286597.onmicrosoft.com` (or assign via a Teams app
-   setup policy) so it appears in Teams.
+The manifest here uses the Agent 365 agentic schema (`manifestVersion:
+devPreview` + `agenticUserTemplates`), which the classic **Teams apps → Manage
+apps → Upload a custom app** page does not understand — uploading there fails
+with a generic "We can't upload the app" error with no useful diagnostics.
+Use the dedicated Agents surface instead:
+
+1. Go to `https://admin.microsoft.com` → **Settings → Integrated apps →
+   Agents** (or **Agents → All agents**, depending on tenant UI version).
+2. Click **Upload custom agent** and upload `agent/manifest/manifest.zip`.
+3. Complete the wizard to **create an instance** — this is the step that
+   actually provisions the agentic teammate user
+   (`nocagent@M365CPI48286597.onmicrosoft.com`) as a real M365 principal, not
+   just a catalog entry. `a365 setup all` already created the blueprint and
+   messaging endpoint; this step is what makes it installable/chattable in
+   Teams.
 
 ## 10. Verify end-to-end
 
