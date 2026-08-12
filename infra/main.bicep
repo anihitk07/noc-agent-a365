@@ -170,6 +170,7 @@ module agentHostRbac 'core/ai/rbac.bicep' = {
     aiServicesAccountName: aiProject.outputs.aiServicesAccountName
     aiProjectName: aiProject.outputs.projectName
     principalId: agentHost.outputs.principalId
+    searchServiceName: aiProject.outputs.search.serviceName
   }
 }
 
