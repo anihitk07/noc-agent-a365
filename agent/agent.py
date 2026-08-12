@@ -359,29 +359,38 @@ class NocAgent(AgentInterface):
         logger.info("📨 Message from %s (%s): %s...", display_name, user_id, message[:80])
 
         user_token = await self._exchange_user_token(auth, auth_handler_name, context)
-        obo_tools, obo_clients = self._build_obo_tools(user_token)
+        history: list[Message] = self._conversations.get(user_id, [])
+        history.append(Message("user", [message]))
 
-        try:
-            history: list[Message] = self._conversations.get(user_id, [])
-            history.append(Message("user", [message]))
-
-            response = await self._agent.run(history, tools=obo_tools)
-
-            self._conversations[user_id] = history + [Message("assistant", [response.text])]
-            return response.text or "I processed your request but couldn't generate a response."
-        except McpError as exc:
-            consent_url = _extract_a2a_consent_url(exc)
-            if consent_url:
-                return f"{_WORK_IQ_CONSENT_PREFIX}{consent_url}"
-            logger.error("❌ MCP tool error: %s", exc, exc_info=True)
-            return f"Sorry, one of my tools failed: {exc}"
-        except Exception as exc:  # noqa: BLE001
-            logger.error("❌ Error processing message: %s", exc, exc_info=True)
-            self._conversations.pop(user_id, None)
-            return f"Sorry, I encountered an error: {exc}"
-        finally:
-            for client in obo_clients:
-                await client.aclose()
+        # ponytail: agent_framework's MCP session init occasionally raises a
+        # spurious anyio "Cancelled via cancel scope ..." error on the first
+        # connect attempt for a per-turn OBO tool (its own code notes genuine
+        # vs. spurious task cancellation can't always be distinguished). One
+        # clean retry with freshly rebuilt tools/clients resolves it; if it
+        # fails twice, it's a real problem and we surface it.
+        for attempt in range(2):
+            obo_tools, obo_clients = self._build_obo_tools(user_token)
+            try:
+                response = await self._agent.run(history, tools=obo_tools)
+                self._conversations[user_id] = history + [Message("assistant", [response.text])]
+                return response.text or "I processed your request but couldn't generate a response."
+            except McpError as exc:
+                consent_url = _extract_a2a_consent_url(exc)
+                if consent_url:
+                    return f"{_WORK_IQ_CONSENT_PREFIX}{consent_url}"
+                logger.error("❌ MCP tool error: %s", exc, exc_info=True)
+                return f"Sorry, one of my tools failed: {exc}"
+            except Exception as exc:  # noqa: BLE001
+                if attempt == 0 and "cancel scope" in str(exc).lower():
+                    logger.warning("⚠️ Transient MCP init cancellation, retrying once: %s", exc)
+                    continue
+                logger.error("❌ Error processing message: %s", exc, exc_info=True)
+                self._conversations.pop(user_id, None)
+                return f"Sorry, I encountered an error: {exc}"
+            finally:
+                for client in obo_clients:
+                    await client.aclose()
+        return "Sorry, I encountered a repeated error and could not complete this request."
 
     # -------------------------------------------------------------------
     # NOTIFICATION HANDLING (A365 email / Word-comment triggers)
