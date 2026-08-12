@@ -55,14 +55,14 @@ sequenceDiagram
     participant WorkIQ as Work IQ (FoundryToolbox)
 
     User->>A365: "What's the blast radius of the SYD-MEL fibre cut?"
-    A365->>A365: on_message handler; start typing indicator
+    A365->>A365: on_message handler, start typing indicator
     A365->>Agent: process_user_message(message, auth, auth_handler_name, context)
     Agent->>A365: auth.exchange_token(scopes=[ai.azure.com/.default], AGENTIC)
     A365-->>Agent: user OBO token
     Agent->>Agent: build per-turn Fabric IQ + Work IQ tools from OBO token
 
     Agent->>Agent: agent.run(history, tools=[fabric_iq, work_iq_toolbox])
-    Note over Agent: default tools (Foundry IQ, Web IQ) always available;<br/>per-turn tools merged for this call only
+    Note over Agent: default tools (Foundry IQ, Web IQ) always available,<br/>per-turn tools merged for this call only
 
     Agent->>FabIQ: network-ontology tool call — blast radius for LINK-SYD-MEL-FIBRE-01
     FabIQ-->>Agent: dependent services (VPN-ACME-CORP, VPN-BIGBANK), shared conduit (CONDUIT-SYD-MEL-INLAND)
