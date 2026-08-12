@@ -40,6 +40,9 @@ param searchServiceSku string = 'standard'
 @description('Create an F2 Microsoft Fabric capacity for Fabric IQ (network ontology + Data Agent).')
 param enableFabricCapacity bool = true
 
+@description('Region for the Fabric capacity, in case the primary region lacks F-SKU quota.')
+param fabricCapacityLocation string = ''
+
 @description('Optional user UPN to add as a Fabric capacity administrator.')
 param fabricAdminUpn string = ''
 
@@ -47,11 +50,17 @@ param fabricAdminUpn string = ''
 param fabricServicePrincipalId string = ''
 
 @description('Microsoft web MCP endpoint for Web IQ.')
-param webIqMcpEndpoint string = 'https://web-iq.microsoft.com/mcp'
+param webIqMcpEndpoint string = 'https://api.microsoft.ai/v3/mcp'
 
 @secure()
 @description('Web IQ API key (CustomKeys auth).')
 param webIqApiKey string = ''
+
+@description('Region for Azure AI Search, in case the primary region lacks capacity.')
+param searchServiceLocation string = ''
+
+@description('Region for the App Service plan/web app, in case the primary region lacks compute quota.')
+param agentHostLocation string = ''
 
 @description('ISO date after which this resource group should be deleted (demo teardown marker).')
 param deleteByDate string = ''
@@ -113,6 +122,7 @@ module aiProject 'core/ai/ai-project.bicep' = {
     deployments: deployments
     enableMonitoring: enableMonitoring
     searchServiceSku: searchServiceSku
+    searchServiceLocation: searchServiceLocation
     foundryIqKnowledgeBaseName: 'noc-knowledge-kb'
     webIqMcpEndpoint: webIqMcpEndpoint
     webIqApiKey: webIqApiKey
@@ -124,7 +134,7 @@ module fabricCapacity 'core/fabric/fabric-capacity.bicep' = if (enableFabricCapa
   name: 'fabric-capacity'
   params: {
     name: 'fabric${resourceToken}'
-    location: location
+    location: empty(fabricCapacityLocation) ? location : fabricCapacityLocation
     adminMember: empty(fabricAdminUpn) ? principalId : fabricAdminUpn
     servicePrincipalId: fabricServicePrincipalId
     tags: tags
@@ -135,7 +145,7 @@ module agentHost 'core/host/appservice.bicep' = {
   scope: rg
   name: 'agent-host'
   params: {
-    location: location
+    location: empty(agentHostLocation) ? location : agentHostLocation
     tags: tags
     resourceToken: resourceToken
     appSettings: {

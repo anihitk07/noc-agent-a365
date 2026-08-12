@@ -24,6 +24,9 @@ param enableMonitoring bool = true
 @description('Azure AI Search SKU.')
 param searchServiceSku string = 'standard'
 
+@description('Region for Azure AI Search, in case the primary region lacks capacity. Defaults to the main location.')
+param searchServiceLocation string = ''
+
 @description('Name of the Foundry IQ knowledge base over the NOC corpus.')
 param foundryIqKnowledgeBaseName string = 'noc-knowledge-kb'
 
@@ -161,6 +164,7 @@ module azureAiSearch '../search/azure_ai_search.bicep' = {
   name: 'azure-ai-search'
   params: {
     tags: tags
+    location: empty(searchServiceLocation) ? location : searchServiceLocation
     resourceName: 'search-${resourceToken}'
     azureSearchSkuName: searchServiceSku
     connectionName: 'azure-ai-search-connection'
@@ -170,7 +174,6 @@ module azureAiSearch '../search/azure_ai_search.bicep' = {
     aiProjectName: aiAccount::project.name
     principalId: principalId
     principalType: principalType
-    location: location
   }
 }
 

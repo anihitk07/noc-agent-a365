@@ -29,7 +29,7 @@ resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
 resource webApp 'Microsoft.Web/sites@2023-12-01' = {
   name: 'app-${resourceToken}'
   location: location
-  tags: tags
+  tags: union(tags, { 'azd-service-name': 'web' })
   kind: 'app,linux'
   identity: {
     type: 'SystemAssigned'
