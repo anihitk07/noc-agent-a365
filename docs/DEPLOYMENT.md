@@ -189,6 +189,37 @@ Push these into the App Service's application settings the same way as step 7
 connection credentials instead of failing at startup with
 `ValueError: No service connection configuration provided.`
 
+## 9b. Publish the Teams app package (manual, one-time, requires Global/Teams Admin)
+
+`a365 publish --aiteammate` (already run) produces
+`agent/manifest/manifest.zip` — a ready-to-upload custom Teams app package
+(gitignored, since it contains tenant-specific IDs). Uploading it to the org
+catalog via Microsoft Graph (`POST /appCatalogs/teamsApps`) was investigated
+and found to be **not fully automatable**:
+
+- A delegated token (e.g. via `az`/`azd`'s cached CLI login) needs the
+  `AppCatalog.ReadWrite.All` scope, which Microsoft blocks for its own
+  first-party CLI app registrations (`AADSTS65002: ... must be configured via
+  preauthorization`) — granting tenant admin consent for that scope on the
+  Azure CLI/azd app id does not work.
+- An application-only (client-credentials) token with the
+  `AppCatalog.ReadWrite.All` **application** permission granted directly via
+  Graph still returns `403 Forbidden — User not authorized to perform this
+  operation` for this endpoint, which appears to additionally require the
+  calling identity to hold the **Teams Administrator** directory role — a
+  role that cannot be cleanly assigned to a service principal for this
+  legacy catalog endpoint.
+
+**Do this instead (~30 seconds, one time):**
+
+1. Go to `https://admin.microsoft.com` → **Teams apps → Manage apps** (or
+   **Agents → All agents**, depending on tenant UI version) → **Upload new
+   app** / **Upload custom app**.
+2. Upload `agent/manifest/manifest.zip`.
+3. Approve/allow it, then install it for the teammate account
+   `nocagent@M365CPI48286597.onmicrosoft.com` (or assign via a Teams app
+   setup policy) so it appears in Teams.
+
 ## 10. Verify end-to-end
 
 In Teams, message the agent and drive the Sydney fibre-cut scenario (see
@@ -199,6 +230,8 @@ model's general knowledge. This step requires a real Teams client signed in
 as a user the teammate app has been installed for — it cannot be simulated by
 posting synthetic activities to `/api/messages` directly, since those lack a
 valid Bot Framework JWT and a real `serviceUrl` to deliver the reply to.
+**This is the one step in this whole deployment that genuinely cannot be
+automated or delegated — it requires a human driving a real Teams client.**
 
 ## 11. Teardown (after E2E passes)
 
@@ -217,6 +250,12 @@ a365 teardown   # or remove the agentic user + blueprint via the M365 admin cent
 #    Foundry account/project, Search, Storage, App Insights -- everything)
 az group show --name "rg-$AZURE_ENV_NAME"   # confirm this is the right RG
 az group delete --name "rg-$AZURE_ENV_NAME" --yes --no-wait
+
+# 4. Remove the temporary automation service principal created during this
+#    session to restore non-interactive `az` CLI access (Contributor scoped
+#    only to the RG being deleted above): search Entra ID → App registrations
+#    for "noc-iq-demo-temp-automation" and delete it, or:
+az ad app delete --id "16af29e6-541c-4103-9913-640204d32e98"
 ```
 
 ## Cost note
