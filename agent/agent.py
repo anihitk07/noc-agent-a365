@@ -412,12 +412,26 @@ class NocAgent(AgentInterface):
         underlying task. On timeout we abandon that tool for this turn
         (best-effort fire-and-forget cancel, errors swallowed) instead of
         blocking on its cancellation completing.
+
+        ponytail: each tool's `__aenter__`/`__aexit__` is called directly
+        (not via a *shared* `AsyncExitStack.enter_async_context()` from
+        concurrent tasks) -- `AsyncExitStack` is not safe for concurrent
+        mutation from multiple tasks at once. Running all 4 connects through
+        `asyncio.gather()` while every task pushed onto the SAME stack
+        instance (the previous version of this fix) corrupted the stack's
+        internal callback bookkeeping, surfacing later as "Could not cleanly
+        close MCP exit stack ... unhandled errors in a TaskGroup" and, worse,
+        an exception that escaped this method's own try/except entirely
+        (thrown from inside `asyncio.gather()`/the corrupted stack, not from
+        a tool) -- silently killing the whole turn with nothing logged.
+        Healthy tools' `__aexit__` callables are registered onto the shared
+        `stack` one at a time, sequentially, only after gather() returns.
         """
         stack = AsyncExitStack()
         healthy: list = []
 
         async def _connect_one(tool):
-            task = asyncio.ensure_future(stack.enter_async_context(tool))
+            task = asyncio.ensure_future(tool.__aenter__())
             try:
                 await asyncio.wait_for(asyncio.shield(task), timeout=TOOL_CONNECT_TIMEOUT_SECONDS)
                 return tool, None
@@ -434,7 +448,7 @@ class NocAgent(AgentInterface):
 
         try:
             results = await asyncio.wait_for(
-                asyncio.gather(*(_connect_one(tool) for tool in tools)),
+                asyncio.gather(*(_connect_one(tool) for tool in tools), return_exceptions=True),
                 timeout=TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
@@ -444,8 +458,21 @@ class NocAgent(AgentInterface):
             )
             return healthy, stack
 
-        for tool, exc in results:
+        for tool, result in zip(tools, results):
+            if isinstance(result, BaseException):
+                # _connect_one itself never raises by design, but gather()
+                # with return_exceptions=True is the belt-and-suspenders
+                # guard against exactly the "escaped my own try/except" class
+                # of bug this docstring describes.
+                logger.warning(
+                    "⚠️ Tool '%s' connect raised unexpectedly, skipping for this turn: %s",
+                    getattr(tool, "name", tool),
+                    result,
+                )
+                continue
+            _, exc = result
             if exc is None:
+                stack.push_async_exit(tool.__aexit__)
                 healthy.append(tool)
             else:
                 logger.warning(
