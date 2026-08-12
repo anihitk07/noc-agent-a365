@@ -89,20 +89,62 @@ step. Otherwise, add it manually in the Foundry portal: **Tools → + Add tool
 
 ## 6. Work IQ
 
-Work IQ has no ARM/Bicep surface — configure it in the Foundry portal:
+Work IQ has no dedicated SDK connection class, and the Foundry portal's
+"Add connection" wizard defaults new Work IQ connections to `authType: OAuth2`
+(interactive browser consent) — that works fine in the Foundry **playground**
+but dead-ends in Teams/A365 (a non-interactive caller) with a repeating
+`oauth_consent_request` loop, silently falling back to a hallucinated answer.
 
-1. In the Foundry project, **Connections → + New connection → Custom**.
-2. `authType`: **`UserEntraToken`** (not `OAuth2` — OAuth2 works in the
-   playground but dead-ends in Teams with an `oauth_consent_request` loop).
-3. Target: the project's toolbox MCP endpoint
-   (`{project_endpoint}/toolboxes/work-iq-tools/mcp?api-version=v1`).
-4. Grant the connection the `ea9ffc3e-8a23-4a7d-836d-234d7c7565c1` (Agent 365
-   Tools) app's `McpServers.Mail.All`, `McpServers.Teams.All`,
-   `McpServersMetadata.Read.All` scopes — these are also declared in
-   `a365.config.template.json`'s `customBlueprintPermissions` and get applied
-   when `a365 setup all` runs (step 8).
+Use `scripts/create_workiq_toolbox.py` instead, which automates both steps
+correctly:
 
-## 7. Deploy the agent code
+```bash
+cd scripts
+python create_workiq_toolbox.py
+```
+
+This:
+
+1. `PUT`s the Foundry project connection `WorkIQ` directly against ARM with
+   `authType: UserEntraToken` (identity passthrough — Foundry forwards the
+   caller's own Entra token via OBO and mints a Work IQ-scoped token; no
+   client secret or Entra app registration required, unlike an OAuth2
+   connection). Target `https://workiq.svc.cloud.microsoft/mcp`, audience
+   `fdcc1f02-fc51-4226-8753-f668596af7f7` (`api://workiq.svc.cloud.microsoft`,
+   scope `WorkIQAgent.Ask`).
+2. Creates and promotes a toolbox version named `work-iq-tools` containing a
+   `WorkIQPreviewToolboxTool` bound to that connection — this is the toolbox
+   `agent/agent.py`'s `FoundryToolbox` targets via
+   `{project_endpoint}/toolboxes/work-iq-tools/mcp?api-version=v1`.
+
+The account-rp preview connections API is intermittently flaky and returns a
+bare `500 InternalServerError`; the script retries with a short backoff and is
+otherwise idempotent (re-running skips the connection PUT if it already has
+the correct config).
+
+`customBlueprintPermissions` in `a365.config.json` still needs the
+`ea9ffc3e-8a23-4a7d-836d-234d7c7565c1` (Agent 365 Tools) app's
+`McpServers.Mail.All`, `McpServers.Teams.All`, `McpServersMetadata.Read.All`
+scopes — applied by `a365 setup all` (step 8), separate from the Foundry
+connection above.
+
+## 7. Push IQ endpoints to the App Service
+
+Steps 3-6 print/`set_key()` into the local `.env` (`AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME`,
+`FABRIC_DATA_AGENT_MCP_URL`, `WEB_IQ_MCP_ENDPOINT`, `WEB_IQ_API_KEY`,
+`CUSTOM_FOUNDRY_WORKIQ_TOOLBOX_NAME`) but the **deployed** agent only reads
+its own App Service application settings, not this file. Push them explicitly:
+
+```bash
+az webapp config appsettings set -g "rg-$AZURE_ENV_NAME" -n "<webAppName>" --settings \
+  AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME=noc-knowledge-kb \
+  FABRIC_DATA_AGENT_MCP_URL="$FABRIC_DATA_AGENT_MCP_URL" \
+  WEB_IQ_MCP_ENDPOINT="https://api.microsoft.ai/v3/mcp" \
+  WEB_IQ_API_KEY="$WEB_IQ_API_KEY" \
+  CUSTOM_FOUNDRY_WORKIQ_TOOLBOX_NAME=work-iq-tools
+```
+
+## 8. Deploy the agent code
 
 ```bash
 cd ..
@@ -112,30 +154,53 @@ azd deploy
 Pushes `agent/` to the App Service created in step 2, running
 `python start_with_generic_host.py`.
 
-## 8. Publish to Teams / M365 Copilot (Agent 365)
+> **Managed identity detection.** `agent.py`'s `_get_service_credential()`
+> uses `ManagedIdentityCredential` when the `WEBSITE_INSTANCE_ID` env var is
+> present (always set by the App Service platform) and falls back to
+> `AzureDeveloperCliCredential` otherwise (local dev, where `azd` is on PATH).
+> If this check is ever changed to something not guaranteed to be set inside
+> the container, every service-credential call fails at startup with
+> `CredentialUnavailableError: Azure Developer CLI could not be found` — the
+> container has no `azd` binary.
+
+## 9. Publish to Teams / M365 Copilot (Agent 365)
 
 ```bash
 cp a365.config.template.json a365.config.json   # gitignored — fill in real values
-a365 setup all
+a365 setup all --aiteammate --m365 --agent-name <agent-name> \
+  --messaging-endpoint "https://<webAppName>.azurewebsites.net/api/messages"
 ```
 
 This mints the agentic teammate identity, registers the blueprint, applies
-`customBlueprintPermissions` (tenant admin consent required), and publishes
-the Teams app manifest. `a365 setup all` writes secrets into
-`a365.generated.config.json` and `agent/.env` (both gitignored) — copy the
-`AGENT365OBSERVABILITY__*` and `AUTH_HANDLER_NAME`/`AGENTAPPLICATION__*`
-values from there into the App Service's application settings (or re-run
-`azd deploy` after updating `agent/.env` if using local env sync).
+`customBlueprintPermissions` (tenant admin consent required), and registers
+the messaging endpoint. In a headless/non-interactive shell (stdin
+redirected), the browser-based admin-consent flow can't be detected, and the
+CLI automatically falls back to granting delegated permissions
+programmatically instead — confirm with `y` if prompted.
 
-## 9. Verify end-to-end
+`a365 setup all` writes secrets into `a365.generated.config.json` and
+`agent/.env` (both gitignored): `AGENT_ID`,
+`CONNECTIONS__SERVICE_CONNECTION__SETTINGS__{CLIENTID,CLIENTSECRET,TENANTID,SCOPES}`,
+and `AGENTAPPLICATION__USERAUTHORIZATION__HANDLERS__AGENTIC__SETTINGS__*`.
+Push these into the App Service's application settings the same way as step 7
+(`az webapp config appsettings set --settings @<file>` with a JSON array of
+`{name, value}` built from `agent/.env`), then restart the app
+(`az webapp restart`) so the `microsoft_agents` SDK picks up real service
+connection credentials instead of failing at startup with
+`ValueError: No service connection configuration provided.`
+
+## 10. Verify end-to-end
 
 In Teams, message the agent and drive the Sydney fibre-cut scenario (see
 `docs/SEQUENCE.md` §3 for the 5 narrative beats to confirm). Cross-check in
 Application Insights (`Transaction search` / `Logs`) that all four IQ tools
 were genuinely invoked for that conversation — not just cited from the
-model's general knowledge.
+model's general knowledge. This step requires a real Teams client signed in
+as a user the teammate app has been installed for — it cannot be simulated by
+posting synthetic activities to `/api/messages` directly, since those lack a
+valid Bot Framework JWT and a real `serviceUrl` to deliver the reply to.
 
-## 10. Teardown (after E2E passes)
+## 11. Teardown (after E2E passes)
 
 **Confirm the resource group name explicitly before deleting — this is
 destructive and irreversible.**
@@ -159,4 +224,4 @@ az group delete --name "rg-$AZURE_ENV_NAME" --yes --no-wait
 The Fabric **F2** capacity is billable (~US$0.36/hr, ~US$260/mo if left
 running). Pause it (Fabric admin portal → Capacity settings → Pause) whenever
 not actively demoing, and delete it with the resource group at teardown
-(step 10.3).
+(step 11.3).
