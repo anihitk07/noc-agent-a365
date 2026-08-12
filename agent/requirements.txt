@@ -2,11 +2,16 @@
 # Agent host runtime dependencies (mirrors pyproject.toml [project].dependencies)
 # =============================================================================
 
-# Microsoft Agent Framework (MAF) -- in-process agent, all 4 IQ tools as MAF tools
+# Microsoft Agent Framework (MAF) -- in-process agent; all 4 IQ tools are
+# native Foundry-hosted tools (FoundryChatClient.get_mcp_tool), not a
+# hand-rolled local MCP client.
 agent-framework-core>=1.10.0
 agent-framework-foundry>=1.10.0
 agent-framework-foundry-hosting>=1.0.0a260630
 mcp>=1.28.1,<2
+
+# Foundry project connection-id resolution (Fabric IQ / Foundry IQ / Web IQ / Work IQ)
+azure-ai-projects>=2.3.0
 
 # Microsoft Agents SDK — A365 hosting layer
 microsoft-agents-hosting-aiohttp==1.1.0

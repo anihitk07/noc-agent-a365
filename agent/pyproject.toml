@@ -12,6 +12,9 @@ dependencies = [
     "agent-framework-foundry-hosting>=1.0.0a260630",
     "mcp>=1.28.1,<2",
 
+    # Foundry project connection-id resolution for the 4 native IQ tools
+    "azure-ai-projects>=2.3.0",
+
     # Microsoft Agents SDK -- A365 hosting layer
     "microsoft-agents-hosting-aiohttp",
     "microsoft-agents-hosting-core",

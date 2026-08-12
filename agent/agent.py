@@ -11,31 +11,41 @@ agent-foundryiq-mcp samples: a single `Agent` with multiple tools bound, where
 the model's own tool-selection performs the routing across IQ surfaces. No
 hand-rolled dispatcher is needed.
 
-Auth-type matrix (see docs/ARCHITECTURE.md for the full rationale):
-  - Foundry IQ (knowledge base MCP) -> service credential (not user-scoped data)
-  - Web IQ (web MCP)                -> static API key (CustomKeys / x-apikey)
-  - Fabric IQ (Fabric Data Agent MCP) -> per-user OBO token (identity passthrough)
-  - Work IQ (FoundryToolbox)          -> per-user OBO token (identity passthrough)
+All four IQ tools are wired as NATIVE Foundry-hosted tools
+(`FoundryChatClient.get_mcp_tool(project_connection_id=...)`), each pointing
+at a pre-registered project Connection, rather than a local Python MCP client
+this code manages by hand. Foundry's own Responses API service runs the
+actual MCP session server-side against that connection -- there is no
+client-side connect/disconnect lifecycle at all. This replaced an earlier
+hand-rolled `MCPStreamableHTTPTool`/`FoundryToolbox`-over-httpx design that
+hit three separate asyncio/anyio bug classes (hang, shared-stack corruption,
+BaseExceptionGroup escape) trying to manage that connection lifecycle
+ourselves (see docs/TROUBLESHOOTING.md for the full history).
 
-Fabric IQ and Work IQ tools are therefore rebuilt on every turn from the user's
-OBO token (obtained via the A365 AgenticUserAuthorization handler) and merged
-into the agent's default tool set for that one `agent.run()` call, rather than
-held open for the lifetime of the process.
+Auth-type matrix (see docs/ARCHITECTURE.md for the full rationale):
+  - Foundry IQ (knowledge base MCP)   -> project connection, service identity
+  - Web IQ (web MCP)                  -> project connection, CustomKeys (x-apikey)
+  - Fabric IQ (Fabric Data Agent MCP) -> project connection, UserEntraToken (OBO identity passthrough)
+  - Work IQ (Microsoft 365 toolbox)   -> project connection, UserEntraToken (OBO identity passthrough)
+
+Fabric IQ and Work IQ's UserEntraToken connections only pass through the real
+Teams user's identity when the FoundryChatClient/Agent used to run the turn is
+itself authenticated as that user, so the chat client is rebuilt fresh every
+turn from the user's OBO token (obtained via the A365 AgenticUserAuthorization
+handler) rather than held open for the lifetime of the process.
 """
+
 
 import asyncio
 import json
 import logging
 import os
 import time
-from collections.abc import Generator
-from contextlib import AsyncExitStack
 from typing import Optional
 
-import httpx
-from agent_framework import Agent, MCPStreamableHTTPTool, Message
+from agent_framework import Agent, Message
 from agent_framework.foundry import FoundryChatClient
-from agent_framework_foundry_hosting import FoundryToolbox
+from azure.ai.projects import AIProjectClient
 from azure.core.credentials import AccessToken, TokenCredential
 from azure.identity import AzureDeveloperCliCredential, ManagedIdentityCredential
 from dotenv import load_dotenv
@@ -68,41 +78,30 @@ PROJECT_ENDPOINT = os.environ["FOUNDRY_PROJECT_ENDPOINT"]
 MODEL_DEPLOYMENT_NAME = os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"]
 AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID")
 
-# Foundry IQ (knowledge base MCP over the NOC runbook/ticket/spec corpus)
-SEARCH_ENDPOINT = os.environ["AZURE_AI_SEARCH_SERVICE_ENDPOINT"]
-KNOWLEDGE_BASE_NAME = os.getenv("AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME", "noc-knowledge-kb")
-SEARCH_SCOPE = "https://search.azure.com/.default"
+# All four IQ tools are wired as NATIVE Foundry-hosted MCP tools (Foundry's
+# Responses API runs the MCP session server-side against a pre-registered
+# project Connection) instead of a local Python MCP client we manage
+# ourselves. See docs/TROUBLESHOOTING.md's "moved to native Foundry tools"
+# entry for why: our own asyncio/anyio MCP client wrapper hit three separate
+# bug classes (hang, shared-stack corruption, BaseExceptionGroup escape)
+# trying to manage this connection lifecycle by hand; Foundry's own service
+# already solves this exact problem for its own hosted tool connections.
+FOUNDRY_IQ_CONNECTION_NAME = os.getenv("FOUNDRY_IQ_CONNECTION_NAME", "kb-mcp-connection")
+WEB_IQ_CONNECTION_NAME = os.getenv("WEB_IQ_CONNECTION_NAME", "web-iq-connection")
+FABRIC_IQ_CONNECTION_NAME = os.getenv("FABRIC_IQ_CONNECTION_NAME", "fabric-iq-connection")
+WORK_IQ_CONNECTION_NAME = os.getenv("WORK_IQ_CONNECTION_NAME", "WorkIQ")
 
-# Web IQ (Microsoft web MCP server, static API key -- CustomKeys, NOT identity passthrough)
-WEB_IQ_MCP_ENDPOINT = os.getenv("WEB_IQ_MCP_ENDPOINT", "https://api.microsoft.ai/v3/mcp")
-WEB_IQ_API_KEY = os.getenv("WEB_IQ_API_KEY", "")
-
-# Fabric IQ (Fabric Data Agent MCP over the NOC network ontology -- OBO identity passthrough)
-FABRIC_DATA_AGENT_MCP_URL = os.getenv("FABRIC_DATA_AGENT_MCP_URL", "")
-FABRIC_SCOPE = "https://api.fabric.microsoft.com/.default"
-
-# Work IQ (Microsoft 365 toolbox -- Teams/Outlook/on-call context, OBO identity passthrough)
-WORKIQ_TOOLBOX_NAME = os.getenv("CUSTOM_FOUNDRY_WORKIQ_TOOLBOX_NAME", "work-iq-tools")
-
-# OBO token scope used to call Fabric IQ / Work IQ through the Foundry project.
+# OBO token scope used to authenticate the WHOLE per-turn Foundry chat client
+# as the calling Teams user (not just one tool call). Fabric IQ/Work IQ's
+# Foundry connections use identity passthrough (UserEntraToken): Foundry
+# performs its own server-side OBO exchange from THIS token's identity to
+# each tool's actual audience, so a single ai.azure.com-scoped token is
+# enough for all four tools -- no separate per-tool token exchange needed.
 FOUNDRY_USER_TOKEN_SCOPES = os.getenv("FOUNDRY_USER_TOKEN_SCOPES", "https://ai.azure.com/.default")
 
-# ponytail: bound to a few seconds so one slow/hanging IQ tool (observed with
-# Work IQ toolbox) degrades that tool gracefully instead of the whole turn
-# hitting the mcp/anyio library's misleading "Cancelled via cancel scope" error.
-TOOL_CONNECT_TIMEOUT_SECONDS = float(os.getenv("TOOL_CONNECT_TIMEOUT_SECONDS", "15"))
-
-# ponytail: _connect_tools() now connects tools sequentially, so its own
-# worst case is naturally bounded (len(tools) x TOOL_CONNECT_TIMEOUT_SECONDS)
-# without needing an extra watchdog around the whole loop. Kept as a named
-# constant purely as a documented upper bound for test_connect_tools.py.
-TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS = float(
-    os.getenv("TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS", str(TOOL_CONNECT_TIMEOUT_SECONDS * 4 + 10))
-)
-
-# ponytail: same anyio cross-task-cancellation hazard can in principle bite a
-# tool *invocation* mid-run (not just the initial connect), so agent.run()
-# gets its own wall-clock cap rather than being able to hang the turn forever.
+# ponytail: a native Foundry tool call still round-trips over the network
+# server-side, so agent.run() keeps its own wall-clock cap rather than being
+# able to hang the turn forever if Foundry's own tool-call plumbing stalls.
 AGENT_RUN_TIMEOUT_SECONDS = float(os.getenv("AGENT_RUN_TIMEOUT_SECONDS", "90"))
 
 NOC_AGENT_INSTRUCTIONS = """You are the NOC/NOA network operations assistant for a telecom
@@ -142,30 +141,13 @@ was unavailable or returned nothing rather than inventing an answer.
 # =============================================================================
 
 
-class _BearerTokenAuth(httpx.Auth):
-    """Attach a fixed bearer token to every request on an httpx client.
-
-    Used for MCP tools where the token is already resolved (a service
-    credential fetch, or a per-turn OBO token) -- as opposed to
-    AzureTokenCredentialAuth patterns elsewhere that refresh from a
-    TokenCredential on every call. Fixed-per-turn is fine here because each
-    NOC chat turn is short-lived and the tool objects are rebuilt per turn.
-    """
-
-    def __init__(self, token: str) -> None:
-        self._token = token
-
-    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
-        request.headers["Authorization"] = f"Bearer {self._token}"
-        yield request
-
-
 class _StaticTokenCredential(TokenCredential):
     """Wrap an already-acquired token string as a TokenCredential.
 
-    FoundryToolbox (Work IQ) expects a TokenCredential, not a raw token string.
-    This lets us forward the per-user OBO token acquired via the A365
-    AgenticUserAuthorization handler into MAF's Work IQ tool.
+    The per-turn FoundryChatClient is authenticated as the calling Teams user
+    (not the app's service credential) so Fabric IQ/Work IQ's identity
+    passthrough resolves to the real user -- this forwards the per-user OBO
+    token acquired via the A365 AgenticUserAuthorization handler.
     """
 
     def __init__(self, token: str) -> None:
@@ -240,8 +222,8 @@ class NocAgent(AgentInterface):
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
         self._service_credential = _get_service_credential()
-        self._chat_client: Optional[FoundryChatClient] = None
-        self._agent: Optional[Agent] = None
+        self._project_client: Optional[AIProjectClient] = None
+        self._connection_ids: dict[str, Optional[str]] = {}
         # Per-user conversation history for context continuity across turns.
         self._conversations: dict[str, list] = {}
 
@@ -250,211 +232,127 @@ class NocAgent(AgentInterface):
     # -------------------------------------------------------------------
 
     async def initialize(self) -> None:
-        """Build the MAF agent shell. All MCP tools are built fresh per turn
-        (see _build_turn_tools) -- Teams can redeliver a message concurrently
-        (slow-ack retry), and a shared, connect-once MCP tool instance entered/
-        exited by two overlapping agent.run() calls hits an anyio cross-task
-        cancel-scope error ("MCP server failed to initialize: Cancelled via
-        cancel scope ..."). Building every tool fresh per turn, like Fabric IQ
-        and Work IQ already did, avoids the whole bug class.
+        """Resolve the 4 IQ tool connection IDs once at startup.
+
+        The chat client/agent themselves are built fresh PER TURN (see
+        process_user_message) because each one must be authenticated as the
+        calling Teams user -- not this service identity -- for Fabric IQ and
+        Work IQ's UserEntraToken connections to pass through the real user's
+        identity. Only the (slow-changing, service-identity-readable)
+        connection-id lookup is worth doing once at startup.
         """
         logger.info("🔌 Initializing NOC agent against %s", PROJECT_ENDPOINT)
 
-        self._chat_client = FoundryChatClient(
-            project_endpoint=PROJECT_ENDPOINT,
-            model=MODEL_DEPLOYMENT_NAME,
-            credential=self._service_credential,
+        self._project_client = AIProjectClient(
+            endpoint=PROJECT_ENDPOINT, credential=self._service_credential
         )
-        self._agent = Agent(
-            client=self._chat_client,
-            name="NocAgent",
-            instructions=NOC_AGENT_INSTRUCTIONS,
-            default_options={"store": False},
-        )
+        connection_names = {
+            "foundry_iq": FOUNDRY_IQ_CONNECTION_NAME,
+            "web_iq": WEB_IQ_CONNECTION_NAME,
+            "fabric_iq": FABRIC_IQ_CONNECTION_NAME,
+            "work_iq": WORK_IQ_CONNECTION_NAME,
+        }
+        for key, name in connection_names.items():
+            try:
+                connection = self._project_client.connections.get(name)
+                self._connection_ids[key] = connection.id
+                logger.info("✅ Resolved connection '%s' -> %s", name, connection.id)
+            except Exception as exc:  # noqa: BLE001 -- degrade this one tool, not the whole agent
+                logger.warning(
+                    "⚠️ Could not resolve connection '%s' (%s tool disabled): %s", name, key, exc
+                )
+                self._connection_ids[key] = None
+
         logger.info("✅ NOC agent ready")
 
     async def cleanup(self) -> None:
-        """No persistent HTTP clients to close -- all tool clients are per-turn."""
+        """No persistent per-turn HTTP/MCP clients to close under native Foundry tools."""
+        if self._project_client is not None:
+            try:
+                self._project_client.close()
+            except Exception:  # noqa: BLE001
+                pass
         logger.info("🧹 Agent cleanup completed")
 
     # -------------------------------------------------------------------
     # PER-TURN TOOLS -- Foundry IQ, Web IQ, Fabric IQ, Work IQ
     # -------------------------------------------------------------------
 
-    def _build_turn_tools(
-        self, foundry_user_token: Optional[str], fabric_user_token: Optional[str]
-    ) -> tuple[list, list[httpx.AsyncClient]]:
-        """Build all four IQ tools fresh for one turn.
+    def _build_turn_tools(self, foundry_user_token: Optional[str]) -> list:
+        """Build all four IQ tools as native Foundry-hosted MCP tool definitions.
 
-        Returns (tools, http_clients_to_close) -- the caller must close the
-        clients after the run() call completes, since MCPStreamableHTTPTool
-        needs its auth attached at construction/session-init time, not applied
-        later via a header_provider.
+        These are NOT client objects with a connect/disconnect lifecycle --
+        FoundryChatClient.get_mcp_tool()/get_fabric_tool() return plain
+        Responses-API tool-definition dicts. Foundry's own service runs the
+        actual MCP round-trip against the referenced project Connection
+        server-side, which is what eliminates the whole local-MCP-client bug
+        class (hang / shared-stack corruption / BaseExceptionGroup escape --
+        see docs/TROUBLESHOOTING.md).
 
-        All tools are built per-turn (not cached on self) because MAF's Agent
-        connects each MCP tool via its own per-run() async exit stack; a tool
-        instance shared across concurrent turns (Teams can redeliver a message
-        while the first is still processing) gets entered/exited by two
-        different tasks at once, which anyio surfaces as "Cancelled via cancel
-        scope ...". Fabric IQ and Work IQ already used this per-turn pattern
-        for OBO-token reasons; Foundry IQ and Web IQ now follow it too.
-
-        Fabric IQ and Work IQ need SEPARATE OBO tokens: Work IQ lives under
-        the Foundry project (ai.azure.com audience), Fabric IQ's Data Agent
-        lives under api.fabric.microsoft.com -- a different token audience
-        entirely. Sending one resource's token to the other's endpoint fails
-        auth, which the mcp/anyio client mis-surfaces as the same misleading
-        "Cancelled via cancel scope ..." error (see docs/TROUBLESHOOTING.md).
+        Fabric IQ and Work IQ's connections are UserEntraToken (identity
+        passthrough): they only work when the calling chat client itself is
+        authenticated as the Teams user, so those two tools are skipped
+        entirely if `foundry_user_token` isn't available this turn (same
+        graceful-degradation contract as before).
         """
         tools: list = []
-        clients: list[httpx.AsyncClient] = []
 
-        service_token = self._service_credential.get_token(SEARCH_SCOPE).token
-        foundry_iq_http_client = httpx.AsyncClient(
-            auth=_BearerTokenAuth(service_token), timeout=120.0
-        )
-        clients.append(foundry_iq_http_client)
-        knowledge_base_endpoint = (
-            f"{SEARCH_ENDPOINT.rstrip('/')}/knowledgebases/{KNOWLEDGE_BASE_NAME}"
-            "/mcp?api-version=2026-05-01-preview"
-        )
-        tools.append(
-            MCPStreamableHTTPTool(
-                name="knowledge-base",
-                url=knowledge_base_endpoint,
-                http_client=foundry_iq_http_client,
-                allowed_tools=["knowledge_base_retrieve"],
-                load_prompts=False,
-            )
-        )
-
-        if WEB_IQ_API_KEY:
-            web_iq_http_client = httpx.AsyncClient(
-                headers={"x-apikey": WEB_IQ_API_KEY}, timeout=60.0
-            )
-            clients.append(web_iq_http_client)
+        if self._connection_ids.get("foundry_iq"):
             tools.append(
-                MCPStreamableHTTPTool(
-                    name="web-search",
-                    url=WEB_IQ_MCP_ENDPOINT,
-                    http_client=web_iq_http_client,
-                    load_prompts=False,
+                FoundryChatClient.get_mcp_tool(
+                    name="knowledge-base",
+                    project_connection_id=self._connection_ids["foundry_iq"],
+                    allowed_tools=["knowledge_base_retrieve"],
+                    approval_mode="never_require",
                 )
             )
         else:
-            logger.warning("⚠️ WEB_IQ_API_KEY not set — Web IQ tool disabled this turn")
+            logger.warning("⚠️ Foundry IQ connection unresolved — tool disabled this turn")
 
-        if fabric_user_token and FABRIC_DATA_AGENT_MCP_URL:
-            # NB: Fabric routes MCP requests through a redirect layer -- the
-            # client MUST set follow_redirects=True or every call fails with a
-            # misleading 500 Internal Server Error.
-            fabric_http_client = httpx.AsyncClient(
-                auth=_BearerTokenAuth(fabric_user_token), timeout=120.0, follow_redirects=True
-            )
-            clients.append(fabric_http_client)
+        if self._connection_ids.get("web_iq"):
             tools.append(
-                MCPStreamableHTTPTool(
-                    name="network-ontology",
-                    url=FABRIC_DATA_AGENT_MCP_URL,
-                    http_client=fabric_http_client,
-                    load_prompts=False,
+                FoundryChatClient.get_mcp_tool(
+                    name="web-search",
+                    project_connection_id=self._connection_ids["web_iq"],
+                    approval_mode="never_require",
                 )
             )
-        elif not FABRIC_DATA_AGENT_MCP_URL:
-            logger.warning("⚠️ FABRIC_DATA_AGENT_MCP_URL not set — Fabric IQ tool disabled this turn")
+        else:
+            logger.warning("⚠️ Web IQ connection unresolved — tool disabled this turn")
 
         if not foundry_user_token:
-            return tools, clients
-
-        toolbox_endpoint = f"{PROJECT_ENDPOINT.rstrip('/')}/toolboxes/{WORKIQ_TOOLBOX_NAME}/mcp?api-version=v1"
-        tools.append(
-            FoundryToolbox(
-                credential=_StaticTokenCredential(foundry_user_token),
-                url=toolbox_endpoint,
-                name="work_iq_toolbox",
-                load_prompts=False,
+            logger.warning(
+                "⚠️ No user OBO token this turn — Fabric IQ/Work IQ (identity passthrough) disabled"
             )
-        )
+            return tools
 
-        return tools, clients
+        if self._connection_ids.get("fabric_iq"):
+            tools.append(
+                FoundryChatClient.get_mcp_tool(
+                    name="network-ontology",
+                    project_connection_id=self._connection_ids["fabric_iq"],
+                    approval_mode="never_require",
+                )
+            )
+        else:
+            logger.warning("⚠️ Fabric IQ connection unresolved — tool disabled this turn")
+
+        if self._connection_ids.get("work_iq"):
+            tools.append(
+                FoundryChatClient.get_mcp_tool(
+                    name="work_iq_toolbox",
+                    project_connection_id=self._connection_ids["work_iq"],
+                    approval_mode="never_require",
+                )
+            )
+        else:
+            logger.warning("⚠️ Work IQ connection unresolved — tool disabled this turn")
+
+        return tools
 
     # -------------------------------------------------------------------
     # MESSAGE PROCESSING
     # -------------------------------------------------------------------
-
-    async def _connect_tools(self, tools: list) -> tuple[list, AsyncExitStack]:
-        """Pre-connect each tool with a bounded timeout, in isolation.
-
-        agent_framework's _prepare_run_context connects any not-yet-connected
-        MCP tool with `enter_async_context()` right before the turn runs. If
-        one tool hangs (observed live with the Work IQ toolbox -- Foundry IQ,
-        Web IQ, and Fabric IQ connect fine, but the 4th tool's initialize()
-        never completes), that hang surfaces as a misleading "Cancelled via
-        cancel scope ..." anyio error that kills the *entire* turn, taking
-        down the 3 healthy tools with it. Connecting each tool ourselves
-        first, with a timeout, drops only the bad tool for this turn --
-        connecting it here sets `tool.is_connected = True`, so the library's
-        own connect loop just skips it.
-
-        ponytail: plain `asyncio.wait_for(coro, timeout)` is NOT safe here.
-        On timeout it cancels the coroutine and then *awaits* it to actually
-        finish absorbing that cancellation before raising TimeoutError. The
-        MCP SDK's connect path opens an anyio TaskGroup/cancel scope; when
-        that scope is cancelled from a task other than the one that entered
-        it (which is exactly what happens once wait_for's internal machinery
-        steps in), anyio can fail to unwind cleanly and the coroutine never
-        actually finishes -- so wait_for itself hangs forever, no
-        TimeoutError is ever raised, no warning is ever logged, and the
-        whole turn goes silent (observed live: two consecutive Teams turns
-        with zero reply once Fabric IQ/Work IQ auth started succeeding and
-        their connect attempts started actually reaching this codepath).
-        Fix: run each connect as its own Task and `shield` it from the
-        wait_for timeout, so a timeout only cancels our *wait*, never the
-        underlying task. On timeout we abandon that tool for this turn
-        (best-effort fire-and-forget cancel, errors swallowed) instead of
-        blocking on its cancellation completing.
-
-        ponytail: tools are connected ONE AT A TIME (not concurrently via
-        asyncio.gather). An earlier version of this fix ran all 4 connects
-        concurrently for a modest latency win that was never asked for, and
-        it cost two separate bugs: (1) every concurrent task pushed onto the
-        SAME shared AsyncExitStack, which isn't safe for concurrent
-        mutation and corrupted its callback bookkeeping; (2) concurrent
-        connection setup made the pre-existing intermittent Fabric IQ/Work
-        IQ "Cancelled via cancel scope" MCP-init flakiness raise a bare
-        anyio `BaseExceptionGroup` (wrapping a `CancelledError`, a
-        `BaseException` subclass, not an `Exception`) that escaped past
-        `except Exception` entirely. Sequential connects have neither
-        problem: only one tool is ever being entered onto the stack at a
-        time, and there's no added connection contention. Worst case is a
-        bounded ~60s (4 tools x TOOL_CONNECT_TIMEOUT_SECONDS) instead of
-        ~15s, which is an acceptable trade against two whole bug classes.
-        """
-        stack = AsyncExitStack()
-        healthy: list = []
-
-        for tool in tools:
-            task = asyncio.ensure_future(tool.__aenter__())
-            try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=TOOL_CONNECT_TIMEOUT_SECONDS)
-                stack.push_async_exit(tool.__aexit__)
-                healthy.append(tool)
-            except BaseException as exc:  # noqa: BLE001 -- catches anyio's bare BaseExceptionGroup too
-                logger.warning(
-                    "⚠️ Tool '%s' failed to connect within %.0fs, skipping for this turn: %s",
-                    getattr(tool, "name", tool),
-                    TOOL_CONNECT_TIMEOUT_SECONDS,
-                    exc,
-                )
-                if not task.done():
-                    task.cancel()
-
-                    def _swallow(t: "asyncio.Task") -> None:
-                        if not t.cancelled():
-                            t.exception()  # retrieve+discard to avoid "never retrieved" noise
-
-                    task.add_done_callback(_swallow)
-        return healthy, stack
 
     async def process_user_message(
         self,
@@ -463,7 +361,7 @@ class NocAgent(AgentInterface):
         auth_handler_name: Optional[str],
         context: TurnContext,
     ) -> str:
-        """Run one turn of the MAF NOC agent, adding OBO-scoped tools for this user."""
+        """Run one turn of the MAF NOC agent, using native Foundry tools scoped to this user."""
         from_prop = context.activity.from_property
         user_id = getattr(from_prop, "id", "default") if from_prop else "default"
         display_name = getattr(from_prop, "name", None) or "unknown"
@@ -472,83 +370,62 @@ class NocAgent(AgentInterface):
         foundry_user_token = await self._exchange_user_token(
             auth, auth_handler_name, context, FOUNDRY_USER_TOKEN_SCOPES
         )
-        fabric_user_token = await self._exchange_user_token(
-            auth, auth_handler_name, context, FABRIC_SCOPE
-        )
         history: list[Message] = self._conversations.get(user_id, [])
         history.append(Message("user", [message]))
 
-        # ponytail: real root cause of the "Cancelled via cancel scope ..."
-        # bug was two Teams-redelivered messages racing on the SAME shared,
-        # connect-once Foundry IQ/Web IQ tool instances (fixed by making all
-        # 4 tools per-turn in _build_turn_tools). This retry is a leftover
-        # safety net for any other transient MCP-init hiccup.
-        for attempt in range(2):
-            turn_tools, turn_clients = self._build_turn_tools(foundry_user_token, fabric_user_token)
-            connected_tools, tool_stack = await self._connect_tools(turn_tools)
-            run_task = asyncio.ensure_future(self._agent.run(history, tools=connected_tools))
-            try:
-                response = await asyncio.wait_for(
-                    asyncio.shield(run_task), timeout=AGENT_RUN_TIMEOUT_SECONDS
-                )
-                self._conversations[user_id] = history + [Message("assistant", [response.text])]
-                return response.text or "I processed your request but couldn't generate a response."
-            except asyncio.TimeoutError:
-                if not run_task.done():
-                    run_task.cancel()
+        # The chat client/agent are rebuilt fresh per turn: native tools carry
+        # no client-side connect state, but the *credential* used to build the
+        # client is what determines whose identity Foundry passes through to
+        # Fabric IQ/Work IQ's UserEntraToken connections, and that credential
+        # is different per Teams user/turn.
+        credential = (
+            _StaticTokenCredential(foundry_user_token) if foundry_user_token else self._service_credential
+        )
+        chat_client = FoundryChatClient(
+            project_endpoint=PROJECT_ENDPOINT,
+            model=MODEL_DEPLOYMENT_NAME,
+            credential=credential,
+        )
+        agent = Agent(
+            client=chat_client,
+            name="NocAgent",
+            instructions=NOC_AGENT_INSTRUCTIONS,
+            default_options={"store": False},
+        )
+        turn_tools = self._build_turn_tools(foundry_user_token)
 
-                    def _swallow(t: "asyncio.Task") -> None:
-                        if not t.cancelled():
-                            t.exception()
+        run_task = asyncio.ensure_future(agent.run(history, tools=turn_tools))
+        try:
+            response = await asyncio.wait_for(asyncio.shield(run_task), timeout=AGENT_RUN_TIMEOUT_SECONDS)
+            self._conversations[user_id] = history + [Message("assistant", [response.text])]
+            return response.text or "I processed your request but couldn't generate a response."
+        except asyncio.TimeoutError:
+            if not run_task.done():
+                run_task.cancel()
 
-                    run_task.add_done_callback(_swallow)
-                logger.error(
-                    "❌ agent.run() exceeded %.0fs watchdog; abandoning this turn",
-                    AGENT_RUN_TIMEOUT_SECONDS,
-                )
-                return (
-                    "Sorry, that request is taking longer than expected. "
-                    "Please try again -- one of my tools may be slow to respond."
-                )
-            except McpError as exc:
-                consent_url = _extract_a2a_consent_url(exc)
-                if consent_url:
-                    return f"{_WORK_IQ_CONSENT_PREFIX}{consent_url}"
-                logger.error("❌ MCP tool error: %s", exc, exc_info=True)
-                return f"Sorry, one of my tools failed: {exc}"
-            except Exception as exc:  # noqa: BLE001
-                if attempt == 0 and "cancel scope" in str(exc).lower():
-                    logger.warning("⚠️ Transient MCP init cancellation, retrying once: %s", exc)
-                    continue
-                logger.error("❌ Error processing message: %s", exc, exc_info=True)
-                self._conversations.pop(user_id, None)
-                return f"Sorry, I encountered an error: {exc}"
-            finally:
-                # ponytail: aclose() can, in principle, hit the same anyio
-                # cross-task-cancellation hazard during teardown. Never let
-                # cleanup itself hang the turn -- shield + abandon past a bound
-                # (same shield pattern as _connect_tools, for the same reason:
-                # a plain wait_for would itself hang if the cancellation isn't
-                # absorbed cleanly).
-                async def _bounded_close(coro, label: str) -> None:
-                    task = asyncio.ensure_future(coro)
-                    try:
-                        await asyncio.wait_for(asyncio.shield(task), timeout=TOOL_CONNECT_TIMEOUT_SECONDS)
-                    except Exception as close_exc:  # noqa: BLE001
-                        logger.warning("⚠️ %s did not finish cleanly: %s", label, close_exc)
-                        if not task.done():
-                            task.cancel()
+                def _swallow(t: "asyncio.Task") -> None:
+                    if not t.cancelled():
+                        t.exception()
 
-                            def _swallow(t: "asyncio.Task") -> None:
-                                if not t.cancelled():
-                                    t.exception()
-
-                            task.add_done_callback(_swallow)
-
-                await _bounded_close(tool_stack.aclose(), "tool_stack.aclose()")
-                for client in turn_clients:
-                    await _bounded_close(client.aclose(), "client.aclose()")
-        return "Sorry, I encountered a repeated error and could not complete this request."
+                run_task.add_done_callback(_swallow)
+            logger.error(
+                "❌ agent.run() exceeded %.0fs watchdog; abandoning this turn",
+                AGENT_RUN_TIMEOUT_SECONDS,
+            )
+            return (
+                "Sorry, that request is taking longer than expected. "
+                "Please try again -- one of my tools may be slow to respond."
+            )
+        except McpError as exc:
+            consent_url = _extract_a2a_consent_url(exc)
+            if consent_url:
+                return f"{_WORK_IQ_CONSENT_PREFIX}{consent_url}"
+            logger.error("❌ MCP tool error: %s", exc, exc_info=True)
+            return f"Sorry, one of my tools failed: {exc}"
+        except Exception as exc:  # noqa: BLE001
+            logger.error("❌ Error processing message: %s", exc, exc_info=True)
+            self._conversations.pop(user_id, None)
+            return f"Sorry, I encountered an error: {exc}"
 
     # -------------------------------------------------------------------
     # NOTIFICATION HANDLING (A365 email / Word-comment triggers)
@@ -602,16 +479,15 @@ class NocAgent(AgentInterface):
         """Get a user-delegated token via the AgenticUserAuthorization handler.
 
         The A365 platform (with inheritable permissions configured on the
-        blueprint) provides user-delegated tokens through this exchange. This
-        token allows Fabric Data Agent and Work IQ to act on behalf of the
-        Teams user rather than a service identity.
-
-        `scope` must match the AUDIENCE of the resource being called (Work IQ
-        lives under the Foundry project -> ai.azure.com; Fabric IQ's Data
-        Agent lives under api.fabric.microsoft.com) -- an access token minted
-        for one audience is rejected by the other, and that rejection is
-        mis-surfaced by the mcp/anyio client as "Cancelled via cancel scope
-        ...", not a clean 401 (see docs/TROUBLESHOOTING.md).
+        blueprint) provides a user-delegated token through this exchange,
+        scoped to `https://ai.azure.com/.default`. This single token is used
+        to build the whole per-turn FoundryChatClient/Agent as the calling
+        Teams user; Foundry's own service then performs its own server-side
+        OBO exchange from this identity to each UserEntraToken-typed tool
+        connection's real audience (Fabric IQ -> api.fabric.microsoft.com,
+        Work IQ -> its own audience) -- so only one token exchange is needed
+        here, unlike the old local-MCP-client design which needed a separate
+        per-tool-audience token (see docs/TROUBLESHOOTING.md).
         """
         if not auth_handler_name:
             logger.warning("⚠️ No auth handler configured — Fabric IQ/Work IQ will be unavailable this turn")

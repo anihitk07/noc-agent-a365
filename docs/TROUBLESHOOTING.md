@@ -3,6 +3,40 @@
 Known gotchas surfaced while researching and building this solution, recorded
 here so `fix-loop` doesn't have to rediscover them.
 
+## Architecture change: moved off the local MCP client entirely (all 4 tools)
+
+The entries below (hang / shared-stack corruption / `BaseExceptionGroup`
+escape / redirect-follow / consent parsing) were all bugs in **our own**
+hand-rolled MCP client wrapper (`MCPStreamableHTTPTool`/`FoundryToolbox` over
+raw `httpx.AsyncClient`s, with a manual `_connect_tools()`
+connect/timeout/close lifecycle). After three rounds of fixes still left
+Fabric IQ and Work IQ intermittently failing to connect, App Insights
+`dependencies` proved the failure was **not a slow timeout** — the `initialize`
+RPC call itself succeeded (`success=True`, ~400ms) at the *exact same
+timestamp* the connect logged as failed, meaning the bug was in
+post-`initialize` client-side connection finalization inside our own wrapper,
+not backend flakiness or a genuinely slow tool.
+
+**Fix: stop managing the MCP client lifecycle ourselves.**
+`agent_framework.foundry.FoundryChatClient` has native
+`get_mcp_tool(project_connection_id=...)` / `get_fabric_tool(connection_id=...)`
+helpers that return plain Responses-API tool-definition objects with **no
+client-side connect/disconnect lifecycle at all** — Foundry's own Responses
+API service runs the MCP round-trip server-side against a pre-registered
+project Connection. This eliminates `_connect_tools()`, `AsyncExitStack`, the
+retry-loop, and the whole bug class below by construction, for all 4 tools
+(not just the 2 that were flaky).
+
+This also let the app drop the separate Fabric-scoped (`api.fabric.microsoft.com`)
+OBO token exchange: identity passthrough for `UserEntraToken` connections
+(Fabric IQ, Work IQ) is now driven purely by which credential builds the
+per-turn `FoundryChatClient` — Foundry itself performs the server-side OBO
+exchange from that one `ai.azure.com`-scoped user token to each connection's
+registered audience.
+
+**Everything in the sections below is now historical** — kept for context on
+why the architecture changed, not as active guidance for the current code.
+
 ## Auth-type mistakes (the #1 failure class)
 
 | Symptom | Cause | Fix |

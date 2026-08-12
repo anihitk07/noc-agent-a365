@@ -85,29 +85,37 @@ which class of question (see the `NOC_AGENT_INSTRUCTIONS` prompt in
 
 ## Per-turn tool rebuild (the "genuine engineering delta")
 
-`MCPStreamableHTTPTool` and `FoundryToolbox` both need their auth attached at
-construction time (a `httpx.Auth` on the `httpx.AsyncClient`, or a
-`TokenCredential`), not applied later. Fabric IQ and Work IQ must also be
-scoped to *the Teams user currently chatting*, so `agent.py` cannot build
-them once at process start. **All four tools are rebuilt fresh every turn**
-(not just the OBO ones) — a shared, connect-once MCP tool instance can be
-entered/exited concurrently by two overlapping `agent.run()` calls (e.g. Teams
-redelivering a slow-to-ack message), which anyio surfaces as `"Cancelled via
-cancel scope ..."`; per-turn tools avoid that whole bug class. On every turn:
+All four IQ tools are **native Foundry-hosted MCP tools**
+(`FoundryChatClient.get_mcp_tool(project_connection_id=...)`), each pointing
+at a pre-registered Foundry project Connection. These are plain Responses-API
+tool-definition objects with **no client-side connect/disconnect lifecycle**
+at all — Foundry's own service runs the actual MCP session server-side. This
+replaced an earlier hand-rolled `MCPStreamableHTTPTool`/`FoundryToolbox`
+design that hit three separate bug classes trying to manage that connection
+lifecycle in this process (see `docs/TROUBLESHOOTING.md`).
+
+What's still genuinely per-turn is the **identity** the tools run as. Fabric
+IQ and Work IQ's Foundry connections are `UserEntraToken` (identity
+passthrough): Foundry performs its own server-side OBO exchange from the
+credential used to build the calling `FoundryChatClient`/`Agent` to each
+connection's registered audience. That means the chat client itself — not
+just the tool list — must be rebuilt every turn as the caller:
 
 1. `NocAgent._exchange_user_token()` calls the A365 `AgenticUserAuthorization`
-   handler (`auth.exchange_token(...)`) to get the caller's OBO token.
-2. `NocAgent._build_turn_tools()` builds fresh Foundry IQ + Web IQ tools (service
-   credential / static API key), and — if a user token is available — fresh
-   Fabric IQ + Work IQ tools wrapped in a fixed-token `httpx.Auth` (Fabric IQ)
-   and a `TokenCredential` shim (`FoundryToolbox` / Work IQ).
-3. `agent.run(history, tools=turn_tools)` runs the turn with all four tools.
-4. The per-turn `httpx.AsyncClient`s are closed in a `finally` block after the
-   call completes.
+   handler (`auth.exchange_token(...)`) once, for the `https://ai.azure.com/.default`
+   scope, to get the caller's OBO token.
+2. `NocAgent.process_user_message()` builds a fresh `FoundryChatClient`/`Agent`
+   for this turn, authenticated with `_StaticTokenCredential(foundry_user_token)`
+   if a user token was obtained, else the app's own service credential.
+3. `NocAgent._build_turn_tools()` builds the 4 native tool definitions from
+   `self._connection_ids` (resolved once at startup via `AIProjectClient`),
+   skipping Fabric IQ/Work IQ entirely if no user token is available this turn.
+4. `agent.run(history, tools=turn_tools)` runs the turn.
 
-This keeps the shared MAF `Agent` instance stateless with respect to identity
-and connection lifecycle — no risk of one user's Fabric/Work IQ session
-leaking into another's turn, and no shared MCP session to race on.
+This keeps per-user identity isolated to the credential used to build each
+turn's chat client — no risk of one user's Fabric/Work IQ session leaking
+into another's turn — while the tool *definitions* themselves are cheap,
+stateless dicts with nothing to close afterward.
 
 ## Infrastructure (`infra/`)
 
