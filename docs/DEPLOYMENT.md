@@ -245,19 +245,19 @@ Use the dedicated Agents surface instead:
    messaging endpoint; this step is what makes it installable/chattable in
    Teams.
 
-## 9c. Grant the agentic user identity the Foundry Agent Consumer role
+## 9c. Grant the agentic user identity the Foundry project RBAC roles
 
 **Required — without this, every turn fails with a 403, not just a degraded
-tool.** Building the per-turn `FoundryChatClient`/`Agent` with the calling
-Teams user's own OBO token (so Fabric IQ/Work IQ's `UserEntraToken`
-connections get real identity passthrough — see `docs/ARCHITECTURE.md`) means
-that user's identity is now the one calling the Foundry Responses API
-directly. That's a separate RBAC check from anything the app's own managed
-identity holds on the Cognitive Services account: the caller needs the
-`Foundry Agent Consumer` role **on the Foundry project**. Grant it to the
-auto-provisioned agentic user identity (its object id appears in Application
-Insights `traces` as `agentic_user_id`, once the human user has messaged the
-agent at least once so the identity exists):
+tool.** The chat client/agent are built with a fixed **service** credential
+(the app's managed identity), but Fabric IQ/Work IQ's `UserEntraToken`
+connections still need OBO identity passthrough for the calling Teams user —
+handled one layer down, at the per-turn MCP tool's `header_provider` (see
+`docs/ARCHITECTURE.md`). That means the calling Teams user's own agentic
+identity also needs RBAC **on the Foundry project** — a separate surface from
+anything the app's managed identity holds on the Cognitive Services account.
+Grant these roles to the auto-provisioned agentic user identity (its object
+id appears in Application Insights `traces` as `agentic_user_id`, once the
+human user has messaged the agent at least once so the identity exists):
 
 ```bash
 az role assignment create \
@@ -275,7 +275,22 @@ az role assignment create \
   --assignee-principal-type User \
   --role "Cognitive Services User" \
   --scope <Foundry project ARM resource id>
+az role assignment create \
+  --assignee-object-id <agentic_user_id> \
+  --assignee-principal-type User \
+  --role "Foundry Project Runtime User" \
+  --scope <Foundry project ARM resource id>
 ```
+
+**`Foundry Project Runtime User` is the role that actually matters for this
+call pattern** — it is the only one of the four whose `dataActions` include
+`Microsoft.CognitiveServices/accounts/AIServices/responses/*`, the exact API
+surface a direct (non-`agent_reference`) Responses API call hits. The other
+three are kept as belt-and-suspenders but were confirmed, by direct
+inspection of each role's `dataActions` via `az role definition list`, not to
+cover this action alone. If a future cleanup pass reconfirms
+`Foundry Project Runtime User` alone is sufficient, the other three can be
+dropped to keep the RBAC model minimal.
 
 This must be repeated for every new distinct human user of the agent (each
 gets their own agentic user identity). RBAC propagation can take a couple of

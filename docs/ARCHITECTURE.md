@@ -83,39 +83,68 @@ fidelity as long as the system instructions tell the model which tool answers
 which class of question (see the `NOC_AGENT_INSTRUCTIONS` prompt in
 `agent/agent.py`).
 
-## Per-turn tool rebuild (the "genuine engineering delta")
+## Per-turn tool: one Foundry Toolbox, one client-side MCP tool (the "genuine engineering delta")
 
-All four IQ tools are **native Foundry-hosted MCP tools**
-(`FoundryChatClient.get_mcp_tool(project_connection_id=...)`), each pointing
-at a pre-registered Foundry project Connection. These are plain Responses-API
-tool-definition objects with **no client-side connect/disconnect lifecycle**
-at all — Foundry's own service runs the actual MCP session server-side. This
-replaced an earlier hand-rolled `MCPStreamableHTTPTool`/`FoundryToolbox`
-design that hit three separate bug classes trying to manage that connection
-lifecycle in this process (see `docs/TROUBLESHOOTING.md`).
+All four IQ connections are bundled into a single **Foundry Toolbox**
+(`project_client.toolboxes.create_version("noc-iq-toolbox", tools=[...])`),
+built once in `NocAgent.initialize()`. Each entry is an `MCPToolboxTool`
+(`server_label`, `server_url=connection.target`,
+`project_connection_id=connection.id`, `require_approval="never"`). The
+toolbox exposes its own combined MCP endpoint:
+`{PROJECT_ENDPOINT}/toolboxes/noc-iq-toolbox/versions/{version}/mcp?api-version=v1`.
 
-What's still genuinely per-turn is the **identity** the tools run as. Fabric
-IQ and Work IQ's Foundry connections are `UserEntraToken` (identity
-passthrough): Foundry performs its own server-side OBO exchange from the
-credential used to build the calling `FoundryChatClient`/`Agent` to each
-connection's registered audience. That means the chat client itself — not
-just the tool list — must be rebuilt every turn as the caller:
+This replaced two earlier designs, in order:
+
+1. A hand-rolled `MCPStreamableHTTPTool`/`FoundryToolbox` wrapper managing raw
+   `httpx.AsyncClient` connect/close lifecycles itself — hit three separate
+   bug classes (see `docs/TROUBLESHOOTING.md`).
+2. `FoundryChatClient.get_mcp_tool(project_connection_id=...)` — this is a
+   **Prompt Agent** pattern (persisted `project.agents.create_version(...)` +
+   `extra_body={"agent_reference": {...}}`), not valid for the **Hosted
+   Agent** pattern this app uses (ephemeral MAF `Agent`/`FoundryChatClient`,
+   direct `responses.create(...)` calls). Mixing the two surfaced as a 400
+   `missing_mutually_exclusive_parameters` error — see
+   `docs/TROUBLESHOOTING.md`.
+
+The current design follows the official ["Hosted agents" MCP tool
+sample](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/model-context-protocol):
+bundle project connections into one Toolbox, then attach that ONE endpoint on
+the **client side** via `agent_framework.MCPStreamableHTTPTool`.
+
+**Chat client / agent are long-lived, not per-turn.** `self._chat_client` and
+`self._agent` are built once in `initialize()`, always authenticated with the
+app's own **service credential** — matching the doc sample, which uses a
+fixed credential rather than a per-user one for the chat client itself.
+
+**What's still genuinely per-turn is the identity used to call the toolbox.**
+Fabric IQ and Work IQ's underlying Foundry connections are `UserEntraToken`
+(identity passthrough). That passthrough now happens one layer below the chat
+client, at the toolbox's own MCP HTTP call:
 
 1. `NocAgent._exchange_user_token()` calls the A365 `AgenticUserAuthorization`
    handler (`auth.exchange_token(...)`) once, for the `https://ai.azure.com/.default`
    scope, to get the caller's OBO token.
-2. `NocAgent.process_user_message()` builds a fresh `FoundryChatClient`/`Agent`
-   for this turn, authenticated with `_StaticTokenCredential(foundry_user_token)`
-   if a user token was obtained, else the app's own service credential.
-3. `NocAgent._build_turn_tools()` builds the 4 native tool definitions from
-   `self._connection_ids` (resolved once at startup via `AIProjectClient`),
-   skipping Fabric IQ/Work IQ entirely if no user token is available this turn.
-4. `agent.run(history, tools=turn_tools)` runs the turn.
+2. `NocAgent._build_turn_tool()` builds a fresh `MCPStreamableHTTPTool` for
+   this turn, pointed at `self._toolbox_mcp_url`, with a `header_provider`
+   closure that returns `{"Authorization": f"Bearer {token}"}` — the caller's
+   OBO token if available, else a freshly-fetched service-credential token.
+   `MCPStreamableHTTPTool` manages its own internal `httpx.AsyncClient` and
+   only injects the header on same-origin requests (a security feature
+   against cross-origin token leaks on redirects); our code never touches
+   raw `httpx` directly.
+3. `NocAgent.process_user_message()` calls `self._agent.run(history,
+   tools=[turn_tool])`, then closes the turn tool (`await turn_tool.close()`)
+   in a `finally` block to release its internal HTTP client.
 
-This keeps per-user identity isolated to the credential used to build each
-turn's chat client — no risk of one user's Fabric/Work IQ session leaking
-into another's turn — while the tool *definitions* themselves are cheap,
-stateless dicts with nothing to close afterward.
+This keeps per-user identity isolated to the header injected on that turn's
+MCP calls — no risk of one user's Fabric/Work IQ session leaking into
+another's turn — while the toolbox definition itself (the set of 4 bundled
+connections) is shared, built once, and reused across all turns and users.
+
+**Known cost/smell**: a new toolbox *version* is created on every app
+start/restart (no dedup/reuse logic). Acceptable for this demo; would
+accumulate garbage versions in a long-lived deployment — see
+`docs/TROUBLESHOOTING.md`.
 
 ## Infrastructure (`infra/`)
 

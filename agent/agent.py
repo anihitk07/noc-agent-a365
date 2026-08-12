@@ -11,16 +11,28 @@ agent-foundryiq-mcp samples: a single `Agent` with multiple tools bound, where
 the model's own tool-selection performs the routing across IQ surfaces. No
 hand-rolled dispatcher is needed.
 
-All four IQ tools are wired as NATIVE Foundry-hosted tools
-(`FoundryChatClient.get_mcp_tool(project_connection_id=...)`), each pointing
-at a pre-registered project Connection, rather than a local Python MCP client
-this code manages by hand. Foundry's own Responses API service runs the
-actual MCP session server-side against that connection -- there is no
-client-side connect/disconnect lifecycle at all. This replaced an earlier
-hand-rolled `MCPStreamableHTTPTool`/`FoundryToolbox`-over-httpx design that
-hit three separate asyncio/anyio bug classes (hang, shared-stack corruption,
-BaseExceptionGroup escape) trying to manage that connection lifecycle
-ourselves (see docs/TROUBLESHOOTING.md for the full history).
+All four IQ tools are bundled behind a single **Foundry Toolbox** MCP
+endpoint (`project.toolboxes.create_version(...)`, one `MCPToolboxTool` per
+project Connection), attached to the MAF `Agent` as ONE client-side
+`agent_framework.MCPStreamableHTTPTool` pointed at that toolbox's own MCP
+URL. This is the pattern Microsoft's own docs specify for *hosted agents*
+(an ephemeral MAF `Agent`/`FoundryChatClient` calling the raw Responses API
+directly, with no persisted server-side Agent object / `agent_reference`) --
+see "Hosted agents" in
+https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/model-context-protocol.
+`FoundryChatClient.get_mcp_tool(project_connection_id=...)` (a native/hosted
+tool attached directly to `tools=[...]` on the Responses call) was tried
+first and looked structurally correct, but the Responses API rejected it
+with `400 missing_mutually_exclusive_parameters` -- that field only resolves
+for **Prompt Agents** created via `project.agents.create_version(...)` and
+invoked with `extra_body={"agent_reference": ...}`, which this code does not
+do. Routing all 4 tools through one Toolbox also means Foundry's own service
+runs each individual tool's MCP round-trip, and the *toolbox* is the only
+thing this code has to manage, replacing an earlier hand-rolled 4-connection
+`MCPStreamableHTTPTool`/`FoundryToolbox`-over-httpx design that hit three
+separate asyncio/anyio bug classes (hang, shared-stack corruption,
+BaseExceptionGroup escape) trying to manage 4 raw MCP client connections by
+hand (see docs/TROUBLESHOOTING.md for the full history).
 
 Auth-type matrix (see docs/ARCHITECTURE.md for the full rationale):
   - Foundry IQ (knowledge base MCP)   -> project connection, service identity
@@ -28,11 +40,19 @@ Auth-type matrix (see docs/ARCHITECTURE.md for the full rationale):
   - Fabric IQ (Fabric Data Agent MCP) -> project connection, UserEntraToken (OBO identity passthrough)
   - Work IQ (Microsoft 365 toolbox)   -> project connection, UserEntraToken (OBO identity passthrough)
 
-Fabric IQ and Work IQ's UserEntraToken connections only pass through the real
-Teams user's identity when the FoundryChatClient/Agent used to run the turn is
-itself authenticated as that user, so the chat client is rebuilt fresh every
-turn from the user's OBO token (obtained via the A365 AgenticUserAuthorization
-handler) rather than held open for the lifetime of the process.
+The `FoundryChatClient` itself is ALWAYS authenticated as this app's own
+SERVICE identity (per the docs' "Hosted agents" sample, which uses
+`AzureCliCredential`/`DefaultAzureCredential`, not a per-user token) --
+identity passthrough for Fabric IQ/Work IQ instead happens one layer down, at
+the Toolbox's own MCP HTTP call: the calling Teams user's OBO token (obtained
+via the A365 AgenticUserAuthorization handler) is injected as the
+`Authorization` header on that one HTTP client via `header_provider`, and the
+Toolbox's `user-entra-token`-configured connections forward that identity to
+Fabric/Work IQ server-side. (An earlier version of this file swapped the
+*whole* FoundryChatClient's credential to the user's OBO token instead, which
+caused the raw Responses API call itself to require Foundry project RBAC
+roles a per-user identity would never sensibly hold -- see
+docs/TROUBLESHOOTING.md's "Foundry project RBAC" entry.)
 """
 
 
@@ -40,13 +60,12 @@ import asyncio
 import json
 import logging
 import os
-import time
 from typing import Optional
 
-from agent_framework import Agent, Message
+from agent_framework import Agent, MCPStreamableHTTPTool, Message
 from agent_framework.foundry import FoundryChatClient
 from azure.ai.projects import AIProjectClient
-from azure.core.credentials import AccessToken, TokenCredential
+from azure.ai.projects.models import MCPToolboxTool
 from azure.identity import AzureDeveloperCliCredential, ManagedIdentityCredential
 from dotenv import load_dotenv
 from mcp import McpError
@@ -90,6 +109,11 @@ FOUNDRY_IQ_CONNECTION_NAME = os.getenv("FOUNDRY_IQ_CONNECTION_NAME", "kb-mcp-con
 WEB_IQ_CONNECTION_NAME = os.getenv("WEB_IQ_CONNECTION_NAME", "web-iq-connection")
 FABRIC_IQ_CONNECTION_NAME = os.getenv("FABRIC_IQ_CONNECTION_NAME", "fabric-iq-connection")
 WORK_IQ_CONNECTION_NAME = os.getenv("WORK_IQ_CONNECTION_NAME", "WorkIQ")
+
+# All 4 connections are bundled behind one Foundry Toolbox (see module
+# docstring) so the MAF Agent only has to manage a single client-side MCP
+# tool, rather than 4 raw MCP client connections.
+NOC_TOOLBOX_NAME = os.getenv("NOC_TOOLBOX_NAME", "noc-iq-toolbox")
 
 # OBO token scope used to authenticate the WHOLE per-turn Foundry chat client
 # as the calling Teams user (not just one tool call). Fabric IQ/Work IQ's
@@ -141,26 +165,8 @@ was unavailable or returned nothing rather than inventing an answer.
 # =============================================================================
 
 
-class _StaticTokenCredential(TokenCredential):
-    """Wrap an already-acquired token string as a TokenCredential.
-
-    The per-turn FoundryChatClient is authenticated as the calling Teams user
-    (not the app's service credential) so Fabric IQ/Work IQ's identity
-    passthrough resolves to the real user -- this forwards the per-user OBO
-    token acquired via the A365 AgenticUserAuthorization handler.
-    """
-
-    def __init__(self, token: str) -> None:
-        self._token = token
-
-    def get_token(self, *scopes: str, **kwargs) -> AccessToken:  # noqa: D102
-        # expires_on is set an hour out -- these tools are only used for the
-        # single agent turn during which this credential instance is alive.
-        return AccessToken(self._token, int(time.time()) + 3600)
-
-
 def _get_service_credential():
-    """Return the app-level (non-user) credential used for Foundry IQ + the model.
+    """Return the app-level (non-user) credential used for the model AND all 4 IQ tools.
 
     WEBSITE_INSTANCE_ID is set by the Azure App Service platform itself (Linux
     and Windows, all SKUs) and is the standard way to detect "running inside App
@@ -224,6 +230,13 @@ class NocAgent(AgentInterface):
         self._service_credential = _get_service_credential()
         self._project_client: Optional[AIProjectClient] = None
         self._connection_ids: dict[str, Optional[str]] = {}
+        self._toolbox_mcp_url: Optional[str] = None
+        # Long-lived FoundryChatClient/Agent: always authenticated as the
+        # SERVICE identity (see module docstring) so it can be built once and
+        # reused across turns -- identity passthrough for Fabric IQ/Work IQ
+        # happens at the per-turn toolbox HTTP call instead.
+        self._chat_client: Optional[FoundryChatClient] = None
+        self._agent: Optional[Agent] = None
         # Per-user conversation history for context continuity across turns.
         self._conversations: dict[str, list] = {}
 
@@ -232,14 +245,16 @@ class NocAgent(AgentInterface):
     # -------------------------------------------------------------------
 
     async def initialize(self) -> None:
-        """Resolve the 4 IQ tool connection IDs once at startup.
+        """Resolve the 4 IQ connections, bundle them into one Foundry Toolbox, build the agent.
 
-        The chat client/agent themselves are built fresh PER TURN (see
-        process_user_message) because each one must be authenticated as the
-        calling Teams user -- not this service identity -- for Fabric IQ and
-        Work IQ's UserEntraToken connections to pass through the real user's
-        identity. Only the (slow-changing, service-identity-readable)
-        connection-id lookup is worth doing once at startup.
+        The Toolbox is what Foundry's own docs specify for "hosted agents"
+        (an ephemeral MAF Agent/FoundryChatClient calling the raw Responses
+        API, no persisted server-side Agent object) -- see module docstring.
+        A new toolbox VERSION is created on every startup, which is simple
+        and correct but does accumulate versions across app restarts/deploys;
+        acceptable for this demo, but worth pruning old versions periodically
+        (`project.toolboxes.list_versions()` / a delete loop) if this ever
+        runs long-lived in a real environment.
         """
         logger.info("🔌 Initializing NOC agent against %s", PROJECT_ENDPOINT)
 
@@ -252,21 +267,66 @@ class NocAgent(AgentInterface):
             "fabric_iq": FABRIC_IQ_CONNECTION_NAME,
             "work_iq": WORK_IQ_CONNECTION_NAME,
         }
+        toolbox_tools = []
         for key, name in connection_names.items():
             try:
-                connection = self._project_client.connections.get(name)
+                connection = self._project_client.connections.get(name, include_credentials=False)
                 self._connection_ids[key] = connection.id
                 logger.info("✅ Resolved connection '%s' -> %s", name, connection.id)
+                toolbox_tools.append(
+                    MCPToolboxTool(
+                        server_label=key.replace("_", "-"),
+                        server_url=connection.target,
+                        project_connection_id=connection.id,
+                        require_approval="never",
+                    )
+                )
             except Exception as exc:  # noqa: BLE001 -- degrade this one tool, not the whole agent
                 logger.warning(
                     "⚠️ Could not resolve connection '%s' (%s tool disabled): %s", name, key, exc
                 )
                 self._connection_ids[key] = None
 
+        if toolbox_tools:
+            try:
+                toolbox = self._project_client.toolboxes.create_version(
+                    NOC_TOOLBOX_NAME,
+                    tools=toolbox_tools,
+                    description="NOC/NOA IQ tools: Foundry IQ, Web IQ, Fabric IQ, Work IQ",
+                )
+                self._toolbox_mcp_url = (
+                    f"{PROJECT_ENDPOINT}/toolboxes/{toolbox.name}/versions/{toolbox.version}/mcp?api-version=v1"
+                )
+                logger.info(
+                    "✅ Toolbox '%s' v%s ready with %d tool(s) -> %s",
+                    toolbox.name,
+                    toolbox.version,
+                    len(toolbox_tools),
+                    self._toolbox_mcp_url,
+                )
+            except Exception:
+                logger.error("❌ Failed to create/update the NOC IQ toolbox", exc_info=True)
+        else:
+            logger.error("❌ No IQ connections resolved -- toolbox not created, no tools this session")
+
+        # The chat client/agent are long-lived and always authenticated as
+        # the service identity; only the toolbox tool is rebuilt per turn.
+        self._chat_client = FoundryChatClient(
+            project_endpoint=PROJECT_ENDPOINT,
+            model=MODEL_DEPLOYMENT_NAME,
+            credential=self._service_credential,
+        )
+        self._agent = Agent(
+            client=self._chat_client,
+            name="NocAgent",
+            instructions=NOC_AGENT_INSTRUCTIONS,
+            default_options={"store": False},
+        )
+
         logger.info("✅ NOC agent ready")
 
     async def cleanup(self) -> None:
-        """No persistent per-turn HTTP/MCP clients to close under native Foundry tools."""
+        """Close the long-lived project client; per-turn toolbox tools close themselves."""
         if self._project_client is not None:
             try:
                 self._project_client.close()
@@ -275,80 +335,46 @@ class NocAgent(AgentInterface):
         logger.info("🧹 Agent cleanup completed")
 
     # -------------------------------------------------------------------
-    # PER-TURN TOOLS -- Foundry IQ, Web IQ, Fabric IQ, Work IQ
+    # PER-TURN TOOL -- one Toolbox MCP tool bundling all 4 IQ surfaces
     # -------------------------------------------------------------------
 
-    def _build_turn_tools(self, foundry_user_token: Optional[str]) -> list:
-        """Build all four IQ tools as native Foundry-hosted MCP tool definitions.
+    def _build_turn_tool(self, foundry_user_token: Optional[str]) -> Optional[MCPStreamableHTTPTool]:
+        """Build the single Toolbox MCP tool for this turn.
 
-        These are NOT client objects with a connect/disconnect lifecycle --
-        FoundryChatClient.get_mcp_tool()/get_fabric_tool() return plain
-        Responses-API tool-definition dicts. Foundry's own service runs the
-        actual MCP round-trip against the referenced project Connection
-        server-side, which is what eliminates the whole local-MCP-client bug
-        class (hang / shared-stack corruption / BaseExceptionGroup escape --
-        see docs/TROUBLESHOOTING.md).
-
-        Fabric IQ and Work IQ's connections are UserEntraToken (identity
-        passthrough): they only work when the calling chat client itself is
-        authenticated as the Teams user, so those two tools are skipped
-        entirely if `foundry_user_token` isn't available this turn (same
-        graceful-degradation contract as before).
+        The Toolbox itself resolves each bundled connection's own auth
+        (CustomKeys for Web IQ, service identity for Foundry IQ). Fabric
+        IQ/Work IQ's UserEntraToken connections instead forward whatever
+        identity authenticated *this HTTP call to the toolbox* -- so the
+        calling Teams user's OBO token is injected here as the Authorization
+        header when available; otherwise the toolbox call (and therefore
+        Fabric IQ/Work IQ) falls back to the service identity, in which case
+        those two tools will simply return "no access"/empty results rather
+        than another user's data (graceful degradation, same contract as
+        before).
         """
-        tools: list = []
+        if not self._toolbox_mcp_url:
+            logger.error("❌ No toolbox MCP URL available -- this turn will have no tools")
+            return None
 
-        if self._connection_ids.get("foundry_iq"):
-            tools.append(
-                FoundryChatClient.get_mcp_tool(
-                    name="knowledge-base",
-                    project_connection_id=self._connection_ids["foundry_iq"],
-                    allowed_tools=["knowledge_base_retrieve"],
-                    approval_mode="never_require",
-                )
-            )
+        if foundry_user_token:
+            bearer_token = foundry_user_token
         else:
-            logger.warning("⚠️ Foundry IQ connection unresolved — tool disabled this turn")
-
-        if self._connection_ids.get("web_iq"):
-            tools.append(
-                FoundryChatClient.get_mcp_tool(
-                    name="web-search",
-                    project_connection_id=self._connection_ids["web_iq"],
-                    approval_mode="never_require",
-                )
-            )
-        else:
-            logger.warning("⚠️ Web IQ connection unresolved — tool disabled this turn")
-
-        if not foundry_user_token:
             logger.warning(
-                "⚠️ No user OBO token this turn — Fabric IQ/Work IQ (identity passthrough) disabled"
+                "⚠️ No user OBO token this turn — Fabric IQ/Work IQ (identity passthrough) "
+                "will fall back to the service identity and likely return no data"
             )
-            return tools
+            bearer_token = self._service_credential.get_token(FOUNDRY_USER_TOKEN_SCOPES).token
 
-        if self._connection_ids.get("fabric_iq"):
-            tools.append(
-                FoundryChatClient.get_mcp_tool(
-                    name="network-ontology",
-                    project_connection_id=self._connection_ids["fabric_iq"],
-                    approval_mode="never_require",
-                )
-            )
-        else:
-            logger.warning("⚠️ Fabric IQ connection unresolved — tool disabled this turn")
+        def _header_provider(_kwargs: dict) -> dict[str, str]:
+            return {"Authorization": f"Bearer {bearer_token}"}
 
-        if self._connection_ids.get("work_iq"):
-            tools.append(
-                FoundryChatClient.get_mcp_tool(
-                    name="work_iq_toolbox",
-                    project_connection_id=self._connection_ids["work_iq"],
-                    approval_mode="never_require",
-                )
-            )
-        else:
-            logger.warning("⚠️ Work IQ connection unresolved — tool disabled this turn")
-
-        return tools
+        return MCPStreamableHTTPTool(
+            name="noc-iq-toolbox",
+            url=self._toolbox_mcp_url,
+            header_provider=_header_provider,
+            load_prompts=False,
+            approval_mode="never_require",
+        )
 
     # -------------------------------------------------------------------
     # MESSAGE PROCESSING
@@ -361,7 +387,7 @@ class NocAgent(AgentInterface):
         auth_handler_name: Optional[str],
         context: TurnContext,
     ) -> str:
-        """Run one turn of the MAF NOC agent, using native Foundry tools scoped to this user."""
+        """Run one turn of the MAF NOC agent, using the per-turn toolbox tool scoped to this user."""
         from_prop = context.activity.from_property
         user_id = getattr(from_prop, "id", "default") if from_prop else "default"
         display_name = getattr(from_prop, "name", None) or "unknown"
@@ -373,28 +399,10 @@ class NocAgent(AgentInterface):
         history: list[Message] = self._conversations.get(user_id, [])
         history.append(Message("user", [message]))
 
-        # The chat client/agent are rebuilt fresh per turn: native tools carry
-        # no client-side connect state, but the *credential* used to build the
-        # client is what determines whose identity Foundry passes through to
-        # Fabric IQ/Work IQ's UserEntraToken connections, and that credential
-        # is different per Teams user/turn.
-        credential = (
-            _StaticTokenCredential(foundry_user_token) if foundry_user_token else self._service_credential
-        )
-        chat_client = FoundryChatClient(
-            project_endpoint=PROJECT_ENDPOINT,
-            model=MODEL_DEPLOYMENT_NAME,
-            credential=credential,
-        )
-        agent = Agent(
-            client=chat_client,
-            name="NocAgent",
-            instructions=NOC_AGENT_INSTRUCTIONS,
-            default_options={"store": False},
-        )
-        turn_tools = self._build_turn_tools(foundry_user_token)
+        turn_tool = self._build_turn_tool(foundry_user_token)
+        turn_tools = [turn_tool] if turn_tool else []
 
-        run_task = asyncio.ensure_future(agent.run(history, tools=turn_tools))
+        run_task = asyncio.ensure_future(self._agent.run(history, tools=turn_tools))
         try:
             response = await asyncio.wait_for(asyncio.shield(run_task), timeout=AGENT_RUN_TIMEOUT_SECONDS)
             self._conversations[user_id] = history + [Message("assistant", [response.text])]
@@ -426,6 +434,12 @@ class NocAgent(AgentInterface):
             logger.error("❌ Error processing message: %s", exc, exc_info=True)
             self._conversations.pop(user_id, None)
             return f"Sorry, I encountered an error: {exc}"
+        finally:
+            if turn_tool is not None:
+                try:
+                    await turn_tool.close()
+                except Exception:  # noqa: BLE001
+                    logger.debug("Toolbox tool close() raised (non-fatal)", exc_info=True)
 
     # -------------------------------------------------------------------
     # NOTIFICATION HANDLING (A365 email / Word-comment triggers)

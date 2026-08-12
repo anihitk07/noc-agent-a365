@@ -165,6 +165,13 @@ module agentHost 'core/host/appservice.bicep' = {
       // Fabric IQ / Work IQ are skipped for every turn (Foundry IQ + Web IQ
       // only) -- this exact gap was root-caused and fixed in this repo.
       AUTH_HANDLER_NAME: 'AGENTIC'
+      // Cold-start latency for the combined Foundry Toolbox (4 bundled MCP
+      // connections: Foundry IQ, Web IQ, Fabric IQ, Work IQ) plus the
+      // per-turn MCPStreamableHTTPTool handshake can exceed the previous 90s
+      // default on a fresh app start / first turn. Raised to 180s after a
+      // live Teams turn hit the 90s watchdog with no underlying exception --
+      // see docs/TROUBLESHOOTING.md.
+      AGENT_RUN_TIMEOUT_SECONDS: '180'
     }
   }
 }
