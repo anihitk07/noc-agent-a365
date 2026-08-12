@@ -92,6 +92,18 @@ FOUNDRY_USER_TOKEN_SCOPES = os.getenv("FOUNDRY_USER_TOKEN_SCOPES", "https://ai.a
 # hitting the mcp/anyio library's misleading "Cancelled via cancel scope" error.
 TOOL_CONNECT_TIMEOUT_SECONDS = float(os.getenv("TOOL_CONNECT_TIMEOUT_SECONDS", "15"))
 
+# ponytail: belt-and-suspenders wall-clock cap on the *whole* _connect_tools
+# loop (4 tools x TOOL_CONNECT_TIMEOUT_SECONDS, plus margin). Guards against
+# the case below where a single tool's cancellation itself never completes.
+TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS = float(
+    os.getenv("TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS", str(TOOL_CONNECT_TIMEOUT_SECONDS * 4 + 10))
+)
+
+# ponytail: same anyio cross-task-cancellation hazard can in principle bite a
+# tool *invocation* mid-run (not just the initial connect), so agent.run()
+# gets its own wall-clock cap rather than being able to hang the turn forever.
+AGENT_RUN_TIMEOUT_SECONDS = float(os.getenv("AGENT_RUN_TIMEOUT_SECONDS", "90"))
+
 NOC_AGENT_INSTRUCTIONS = """You are the NOC/NOA network operations assistant for a telecom
 provider. You help on-call engineers triage incidents such as fibre cuts, router failures,
 and amplifier faults.
@@ -382,16 +394,60 @@ class NocAgent(AgentInterface):
         first, with a timeout, drops only the bad tool for this turn --
         connecting it here sets `tool.is_connected = True`, so the library's
         own connect loop just skips it.
+
+        ponytail: plain `asyncio.wait_for(coro, timeout)` is NOT safe here.
+        On timeout it cancels the coroutine and then *awaits* it to actually
+        finish absorbing that cancellation before raising TimeoutError. The
+        MCP SDK's connect path opens an anyio TaskGroup/cancel scope; when
+        that scope is cancelled from a task other than the one that entered
+        it (which is exactly what happens once wait_for's internal machinery
+        steps in), anyio can fail to unwind cleanly and the coroutine never
+        actually finishes -- so wait_for itself hangs forever, no
+        TimeoutError is ever raised, no warning is ever logged, and the
+        whole turn goes silent (observed live: two consecutive Teams turns
+        with zero reply once Fabric IQ/Work IQ auth started succeeding and
+        their connect attempts started actually reaching this codepath).
+        Fix: run each connect as its own Task and `shield` it from the
+        wait_for timeout, so a timeout only cancels our *wait*, never the
+        underlying task. On timeout we abandon that tool for this turn
+        (best-effort fire-and-forget cancel, errors swallowed) instead of
+        blocking on its cancellation completing.
         """
         stack = AsyncExitStack()
         healthy: list = []
-        for tool in tools:
+
+        async def _connect_one(tool):
+            task = asyncio.ensure_future(stack.enter_async_context(tool))
             try:
-                await asyncio.wait_for(
-                    stack.enter_async_context(tool), timeout=TOOL_CONNECT_TIMEOUT_SECONDS
-                )
-                healthy.append(tool)
+                await asyncio.wait_for(asyncio.shield(task), timeout=TOOL_CONNECT_TIMEOUT_SECONDS)
+                return tool, None
             except Exception as exc:  # noqa: BLE001
+                if not task.done():
+                    task.cancel()
+
+                    def _swallow(t: "asyncio.Task") -> None:
+                        if not t.cancelled():
+                            t.exception()  # retrieve+discard to avoid "never retrieved" noise
+
+                    task.add_done_callback(_swallow)
+                return tool, exc
+
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*(_connect_one(tool) for tool in tools)),
+                timeout=TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "❌ _connect_tools exceeded overall %.0fs watchdog; proceeding with no tools this turn",
+                TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS,
+            )
+            return healthy, stack
+
+        for tool, exc in results:
+            if exc is None:
+                healthy.append(tool)
+            else:
                 logger.warning(
                     "⚠️ Tool '%s' failed to connect within %.0fs, skipping for this turn: %s",
                     getattr(tool, "name", tool),
@@ -430,10 +486,30 @@ class NocAgent(AgentInterface):
         for attempt in range(2):
             turn_tools, turn_clients = self._build_turn_tools(foundry_user_token, fabric_user_token)
             connected_tools, tool_stack = await self._connect_tools(turn_tools)
+            run_task = asyncio.ensure_future(self._agent.run(history, tools=connected_tools))
             try:
-                response = await self._agent.run(history, tools=connected_tools)
+                response = await asyncio.wait_for(
+                    asyncio.shield(run_task), timeout=AGENT_RUN_TIMEOUT_SECONDS
+                )
                 self._conversations[user_id] = history + [Message("assistant", [response.text])]
                 return response.text or "I processed your request but couldn't generate a response."
+            except asyncio.TimeoutError:
+                if not run_task.done():
+                    run_task.cancel()
+
+                    def _swallow(t: "asyncio.Task") -> None:
+                        if not t.cancelled():
+                            t.exception()
+
+                    run_task.add_done_callback(_swallow)
+                logger.error(
+                    "❌ agent.run() exceeded %.0fs watchdog; abandoning this turn",
+                    AGENT_RUN_TIMEOUT_SECONDS,
+                )
+                return (
+                    "Sorry, that request is taking longer than expected. "
+                    "Please try again -- one of my tools may be slow to respond."
+                )
             except McpError as exc:
                 consent_url = _extract_a2a_consent_url(exc)
                 if consent_url:
@@ -448,9 +524,30 @@ class NocAgent(AgentInterface):
                 self._conversations.pop(user_id, None)
                 return f"Sorry, I encountered an error: {exc}"
             finally:
-                await tool_stack.aclose()
+                # ponytail: aclose() can, in principle, hit the same anyio
+                # cross-task-cancellation hazard during teardown. Never let
+                # cleanup itself hang the turn -- shield + abandon past a bound
+                # (same shield pattern as _connect_tools, for the same reason:
+                # a plain wait_for would itself hang if the cancellation isn't
+                # absorbed cleanly).
+                async def _bounded_close(coro, label: str) -> None:
+                    task = asyncio.ensure_future(coro)
+                    try:
+                        await asyncio.wait_for(asyncio.shield(task), timeout=TOOL_CONNECT_TIMEOUT_SECONDS)
+                    except Exception as close_exc:  # noqa: BLE001
+                        logger.warning("⚠️ %s did not finish cleanly: %s", label, close_exc)
+                        if not task.done():
+                            task.cancel()
+
+                            def _swallow(t: "asyncio.Task") -> None:
+                                if not t.cancelled():
+                                    t.exception()
+
+                            task.add_done_callback(_swallow)
+
+                await _bounded_close(tool_stack.aclose(), "tool_stack.aclose()")
                 for client in turn_clients:
-                    await client.aclose()
+                    await _bounded_close(client.aclose(), "client.aclose()")
         return "Sorry, I encountered a repeated error and could not complete this request."
 
     # -------------------------------------------------------------------
