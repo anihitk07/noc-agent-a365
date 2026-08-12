@@ -265,6 +265,16 @@ az role assignment create \
   --assignee-principal-type User \
   --role "Foundry Agent Consumer" \
   --scope <Foundry project ARM resource id>
+az role assignment create \
+  --assignee-object-id <agentic_user_id> \
+  --assignee-principal-type User \
+  --role "Cognitive Services OpenAI User" \
+  --scope <Foundry project ARM resource id>
+az role assignment create \
+  --assignee-object-id <agentic_user_id> \
+  --assignee-principal-type User \
+  --role "Cognitive Services User" \
+  --scope <Foundry project ARM resource id>
 ```
 
 This must be repeated for every new distinct human user of the agent (each
