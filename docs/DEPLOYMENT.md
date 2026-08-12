@@ -245,6 +245,33 @@ Use the dedicated Agents surface instead:
    messaging endpoint; this step is what makes it installable/chattable in
    Teams.
 
+## 9c. Grant the agentic user identity the Foundry Agent Consumer role
+
+**Required — without this, every turn fails with a 403, not just a degraded
+tool.** Building the per-turn `FoundryChatClient`/`Agent` with the calling
+Teams user's own OBO token (so Fabric IQ/Work IQ's `UserEntraToken`
+connections get real identity passthrough — see `docs/ARCHITECTURE.md`) means
+that user's identity is now the one calling the Foundry Responses API
+directly. That's a separate RBAC check from anything the app's own managed
+identity holds on the Cognitive Services account: the caller needs the
+`Foundry Agent Consumer` role **on the Foundry project**. Grant it to the
+auto-provisioned agentic user identity (its object id appears in Application
+Insights `traces` as `agentic_user_id`, once the human user has messaged the
+agent at least once so the identity exists):
+
+```bash
+az role assignment create \
+  --assignee-object-id <agentic_user_id> \
+  --assignee-principal-type User \
+  --role "Foundry Agent Consumer" \
+  --scope <Foundry project ARM resource id>
+```
+
+This must be repeated for every new distinct human user of the agent (each
+gets their own agentic user identity). RBAC propagation can take a couple of
+minutes before the next turn succeeds. See `docs/TROUBLESHOOTING.md`'s
+"Foundry project RBAC" entry for the full symptom/diagnosis.
+
 ## 10. Verify end-to-end
 
 In Teams, message the agent and drive the Sydney fibre-cut scenario (see
