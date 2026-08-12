@@ -92,9 +92,10 @@ FOUNDRY_USER_TOKEN_SCOPES = os.getenv("FOUNDRY_USER_TOKEN_SCOPES", "https://ai.a
 # hitting the mcp/anyio library's misleading "Cancelled via cancel scope" error.
 TOOL_CONNECT_TIMEOUT_SECONDS = float(os.getenv("TOOL_CONNECT_TIMEOUT_SECONDS", "15"))
 
-# ponytail: belt-and-suspenders wall-clock cap on the *whole* _connect_tools
-# loop (4 tools x TOOL_CONNECT_TIMEOUT_SECONDS, plus margin). Guards against
-# the case below where a single tool's cancellation itself never completes.
+# ponytail: _connect_tools() now connects tools sequentially, so its own
+# worst case is naturally bounded (len(tools) x TOOL_CONNECT_TIMEOUT_SECONDS)
+# without needing an extra watchdog around the whole loop. Kept as a named
+# constant purely as a documented upper bound for test_connect_tools.py.
 TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS = float(
     os.getenv("TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS", str(TOOL_CONNECT_TIMEOUT_SECONDS * 4 + 10))
 )
@@ -413,29 +414,38 @@ class NocAgent(AgentInterface):
         (best-effort fire-and-forget cancel, errors swallowed) instead of
         blocking on its cancellation completing.
 
-        ponytail: each tool's `__aenter__`/`__aexit__` is called directly
-        (not via a *shared* `AsyncExitStack.enter_async_context()` from
-        concurrent tasks) -- `AsyncExitStack` is not safe for concurrent
-        mutation from multiple tasks at once. Running all 4 connects through
-        `asyncio.gather()` while every task pushed onto the SAME stack
-        instance (the previous version of this fix) corrupted the stack's
-        internal callback bookkeeping, surfacing later as "Could not cleanly
-        close MCP exit stack ... unhandled errors in a TaskGroup" and, worse,
-        an exception that escaped this method's own try/except entirely
-        (thrown from inside `asyncio.gather()`/the corrupted stack, not from
-        a tool) -- silently killing the whole turn with nothing logged.
-        Healthy tools' `__aexit__` callables are registered onto the shared
-        `stack` one at a time, sequentially, only after gather() returns.
+        ponytail: tools are connected ONE AT A TIME (not concurrently via
+        asyncio.gather). An earlier version of this fix ran all 4 connects
+        concurrently for a modest latency win that was never asked for, and
+        it cost two separate bugs: (1) every concurrent task pushed onto the
+        SAME shared AsyncExitStack, which isn't safe for concurrent
+        mutation and corrupted its callback bookkeeping; (2) concurrent
+        connection setup made the pre-existing intermittent Fabric IQ/Work
+        IQ "Cancelled via cancel scope" MCP-init flakiness raise a bare
+        anyio `BaseExceptionGroup` (wrapping a `CancelledError`, a
+        `BaseException` subclass, not an `Exception`) that escaped past
+        `except Exception` entirely. Sequential connects have neither
+        problem: only one tool is ever being entered onto the stack at a
+        time, and there's no added connection contention. Worst case is a
+        bounded ~60s (4 tools x TOOL_CONNECT_TIMEOUT_SECONDS) instead of
+        ~15s, which is an acceptable trade against two whole bug classes.
         """
         stack = AsyncExitStack()
         healthy: list = []
 
-        async def _connect_one(tool):
+        for tool in tools:
             task = asyncio.ensure_future(tool.__aenter__())
             try:
                 await asyncio.wait_for(asyncio.shield(task), timeout=TOOL_CONNECT_TIMEOUT_SECONDS)
-                return tool, None
-            except Exception as exc:  # noqa: BLE001
+                stack.push_async_exit(tool.__aexit__)
+                healthy.append(tool)
+            except BaseException as exc:  # noqa: BLE001 -- catches anyio's bare BaseExceptionGroup too
+                logger.warning(
+                    "⚠️ Tool '%s' failed to connect within %.0fs, skipping for this turn: %s",
+                    getattr(tool, "name", tool),
+                    TOOL_CONNECT_TIMEOUT_SECONDS,
+                    exc,
+                )
                 if not task.done():
                     task.cancel()
 
@@ -444,43 +454,6 @@ class NocAgent(AgentInterface):
                             t.exception()  # retrieve+discard to avoid "never retrieved" noise
 
                     task.add_done_callback(_swallow)
-                return tool, exc
-
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*(_connect_one(tool) for tool in tools), return_exceptions=True),
-                timeout=TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            logger.error(
-                "❌ _connect_tools exceeded overall %.0fs watchdog; proceeding with no tools this turn",
-                TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS,
-            )
-            return healthy, stack
-
-        for tool, result in zip(tools, results):
-            if isinstance(result, BaseException):
-                # _connect_one itself never raises by design, but gather()
-                # with return_exceptions=True is the belt-and-suspenders
-                # guard against exactly the "escaped my own try/except" class
-                # of bug this docstring describes.
-                logger.warning(
-                    "⚠️ Tool '%s' connect raised unexpectedly, skipping for this turn: %s",
-                    getattr(tool, "name", tool),
-                    result,
-                )
-                continue
-            _, exc = result
-            if exc is None:
-                stack.push_async_exit(tool.__aexit__)
-                healthy.append(tool)
-            else:
-                logger.warning(
-                    "⚠️ Tool '%s' failed to connect within %.0fs, skipping for this turn: %s",
-                    getattr(tool, "name", tool),
-                    TOOL_CONNECT_TIMEOUT_SECONDS,
-                    exc,
-                )
         return healthy, stack
 
     async def process_user_message(

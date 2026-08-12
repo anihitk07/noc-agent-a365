@@ -1,17 +1,25 @@
 # Copyright (c) Microsoft. All rights reserved.
 
-"""Self-check for the _connect_tools() hang + shared-stack-corruption fixes
-(see docs/TROUBLESHOOTING.md, "Teams turn produces zero reply at all").
+"""Self-check for _connect_tools() (see docs/TROUBLESHOOTING.md, "Teams turn
+produces zero reply at all").
 
-Two regressions reproduced here:
+Regressions reproduced here:
 1. A tool whose __aenter__ swallows cancellation and never actually stops.
    Plain `asyncio.wait_for(coro, t)` hangs forever in that case (it awaits
    the cancelled coroutine to finish before raising TimeoutError).
    `_connect_tools()`'s shield-based rewrite must still return, dropping
    only the misbehaving tool, within a bounded time.
-2. Connecting tools concurrently while every task registers onto the SAME
-   shared `AsyncExitStack` corrupts its callback bookkeeping. Every healthy
-   tool must still connect and later close cleanly.
+2. A tool whose __aenter__ raises a bare anyio `BaseExceptionGroup` wrapping
+   a `CancelledError` (a `BaseException`, not an `Exception`) -- observed
+   live from Fabric IQ's intermittent MCP-init flakiness. A plain
+   `except Exception` misses this; `_connect_tools()` must catch
+   `BaseException` to still drop just that tool instead of the whole turn
+   raising uncaught.
+3. Several healthy tools connected one after another must all register and
+   later close cleanly on the shared `AsyncExitStack` (this is inherently
+   safe now that connects are sequential, not concurrent -- an earlier,
+   reverted version of this fix ran connects via asyncio.gather() and
+   corrupted the shared stack under concurrent registration).
 
 Run directly: python agent/test_connect_tools.py
 """
@@ -96,6 +104,22 @@ class _HangingTool:
         return False
 
 
+class _ExceptionGroupTool:
+    """Simulates the observed live Fabric IQ flakiness: __aenter__ raises a
+    bare anyio BaseExceptionGroup wrapping a CancelledError. CancelledError
+    is a BaseException, not an Exception, since Python 3.8 -- so a
+    BaseExceptionGroup containing one is itself NOT an Exception subclass
+    and slips straight through a plain `except Exception`."""
+
+    name = "exception_group_tool"
+
+    async def __aenter__(self):
+        raise BaseExceptionGroup("unhandled errors in a TaskGroup", [asyncio.CancelledError()])
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
 async def check_hang_is_contained() -> None:
     agent = NocAgent()  # __init__ does no I/O, safe without real credentials
 
@@ -103,7 +127,7 @@ async def check_hang_is_contained() -> None:
     healthy, stack = await asyncio.wait_for(
         agent._connect_tools([_HealthyTool(), _HangingTool()]),
         # Generous outer bound: proves _connect_tools() itself returns
-        # (via its own internal watchdog) rather than hanging forever.
+        # rather than hanging forever.
         timeout=TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS + 5,
     )
     elapsed = time.monotonic() - start
@@ -118,35 +142,44 @@ async def check_hang_is_contained() -> None:
     print("OK: stack.aclose() for the surviving tool returned promptly")
 
 
-async def check_concurrent_connects_dont_corrupt_shared_stack() -> None:
-    """Regression test for the SECOND bug this fix uncovered: connecting
-    tools concurrently via asyncio.gather() while every task called
-    `stack.enter_async_context()` on the SAME shared AsyncExitStack
-    corrupted its callback bookkeeping (observed live as "Could not cleanly
-    close MCP exit stack ... unhandled errors in a TaskGroup", and an
-    exception that escaped _connect_tools()'s own try/except entirely,
-    silently killing the whole turn with nothing logged). Every healthy
-    tool here must connect AND, later, have __aexit__ actually invoked
-    exactly once via stack.aclose() -- proving the shared stack survives
-    genuine concurrent registration intact."""
+async def check_exception_group_is_caught() -> None:
+    """Regression test: a tool whose __aenter__ raises a bare
+    BaseExceptionGroup (observed live from Fabric IQ) must be dropped
+    gracefully, not propagate out of _connect_tools() uncaught."""
     agent = NocAgent()
-    tools = [_HealthyTool(f"tool_{i}") for i in range(5)] + [_HangingTool()]
+    healthy, stack = await asyncio.wait_for(
+        agent._connect_tools([_HealthyTool(), _ExceptionGroupTool()]),
+        timeout=TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS + 5,
+    )
+    assert [t.name for t in healthy] == ["healthy_tool"], (
+        f"expected only the healthy tool to survive, got {[getattr(t, 'name', t) for t in healthy]}"
+    )
+    await asyncio.wait_for(stack.aclose(), timeout=5)
+    print("OK: a tool raising a bare BaseExceptionGroup was dropped without killing the turn")
+
+
+async def check_multiple_healthy_tools_connect_and_close_cleanly() -> None:
+    """Several tools connected one after another (sequentially, by design --
+    see _connect_tools()'s docstring for why concurrency was reverted) must
+    all register onto the shared AsyncExitStack and later have __aexit__
+    actually invoked exactly once via stack.aclose()."""
+    agent = NocAgent()
+    tools = [_HealthyTool(f"tool_{i}") for i in range(5)]
 
     healthy, stack = await asyncio.wait_for(
         agent._connect_tools(tools), timeout=TOOLS_CONNECT_TOTAL_TIMEOUT_SECONDS + 5
     )
-    assert len(healthy) == 5, f"expected all 5 healthy tools to survive concurrent connect, got {len(healthy)}"
+    assert len(healthy) == 5, f"expected all 5 healthy tools to survive, got {len(healthy)}"
 
     await asyncio.wait_for(stack.aclose(), timeout=5)
-    assert all(t.exited for t in tools if isinstance(t, _HealthyTool)), (
-        "not every healthy tool's __aexit__ ran -- shared AsyncExitStack was corrupted by concurrent registration"
-    )
-    print("OK: 5 concurrently-connected tools all registered and closed cleanly on the shared stack")
+    assert all(t.exited for t in tools), "not every healthy tool's __aexit__ ran"
+    print("OK: 5 sequentially-connected tools all registered and closed cleanly on the shared stack")
 
 
 async def main() -> None:
     await check_hang_is_contained()
-    await check_concurrent_connects_dont_corrupt_shared_stack()
+    await check_exception_group_is_caught()
+    await check_multiple_healthy_tools_connect_and_close_cleanly()
 
     # ponytail: _HangingTool's __aenter__ deliberately never honors
     # cancellation (that's the whole point -- it's what a broken MCP
