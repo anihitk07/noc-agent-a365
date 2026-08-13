@@ -18,7 +18,12 @@ call sequence.
 
 ```
 Teams / M365 Copilot
-        │  A365 teammate account (AgenticUserAuthorization → OBO user token)
+        │  user message
+        ▼
+Azure Bot Service (channel connector)
+        │  registered via `a365 setup all --messaging-endpoint https://<app>/api/messages`
+        │  POSTs Bot Framework Activity JSON, A365 teammate identity
+        │  (AgenticUserAuthorization → OBO user token available to the app)
         ▼
 ┌───────────────────────────────────────────────────────────────────────┐
 │ agent/  (Azure App Service, Linux, Python 3.13)                       │
@@ -26,21 +31,33 @@ Teams / M365 Copilot
 │  host_agent_server.py   Generic A365 host: AgentApplication +          │
 │                         Authorization + CloudAdapter, message/         │
 │                         notification/installationUpdate handlers,      │
-│                         typing indicators, /api/health, JWT middleware. │
-│                         (Ported verbatim — no NOC-specific logic.)      │
+│                         typing indicators, /api/health, /api/messages, │
+│                         JWT middleware. (Ported verbatim — no          │
+│                         NOC-specific logic.)                          │
 │                                                                        │
 │  agent.py               NocAgent(AgentInterface). Owns one MAF Agent   │
 │                         built from FoundryChatClient(project_endpoint, │
-│                         model=gpt-5.4). Default tools (built once,     │
-│                         service-credentialed): Foundry IQ + Web IQ.    │
-│                         Per-turn tools (rebuilt from the caller's OBO  │
-│                         token, merged via agent.run(tools=...)):       │
-│                         Fabric IQ + Work IQ.                           │
+│                         model=gpt-5.4), always service-credentialed.   │
+│                         Each turn, rebuilds ONE MCPStreamableHTTPTool   │
+│                         pointed at the "noc-iq-toolbox" Foundry        │
+│                         Toolbox MCP endpoint, with the caller's OBO    │
+│                         token (or service-credential fallback)         │
+│                         injected as the Authorization header. There    │
+│                         is no separate default-vs-per-turn tool split  │
+│                         — all 4 IQ connections sit behind that one     │
+│                         toolbox (see SEQUENCE.md §2).                  │
 │                                                                        │
 │  token_cache.py,        Generic A365 plumbing (observability token     │
 │  agent_interface.py,    cache, the AgentInterface ABC, local dev auth  │
 │  local_authentication_  options). Ported verbatim.                    │
 │  options.py                                                            │
+└───────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│ noc-iq-toolbox  (ONE Foundry Toolbox, ONE MCP endpoint)                │
+│  Built by NocAgent.initialize() at every app start, bundling all 4     │
+│  project connections as generic MCPToolboxTool entries.                │
 └───────────────────────────────────────────────────────────────────────┘
         │                    │                    │                  │
         ▼                    ▼                    ▼                  ▼

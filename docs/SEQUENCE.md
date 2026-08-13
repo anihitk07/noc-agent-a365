@@ -53,7 +53,8 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     participant User as Teams user
-    participant A365 as A365 host (host_agent_server.py)
+    participant Bot as Azure Bot Service<br/>(channel connector)
+    participant A365 as App Service — host_agent_server.py<br/>(/api/messages, CloudAdapter)
     participant Agent as NocAgent (agent.py, MAF)
     participant TB as noc-iq-toolbox<br/>(ONE Foundry Toolbox MCP endpoint)
     participant FIQ as Foundry IQ connection
@@ -61,7 +62,8 @@ sequenceDiagram
     participant WebIQ as Web IQ connection
     participant WorkIQ as Work IQ connection
 
-    User->>A365: "What's the blast radius of the SYD-MEL fibre cut?"
+    User->>Bot: "What's the blast radius of the SYD-MEL fibre cut?"
+    Bot->>A365: POST /api/messages (Bot Framework Activity JSON)
     A365->>A365: on_message handler, start typing indicator
     A365->>Agent: process_user_message(message, auth, auth_handler_name, context)
     Agent->>A365: auth.exchange_token(scopes=[ai.azure.com/.default], AGENTIC)
@@ -98,7 +100,8 @@ sequenceDiagram
 
     Agent->>Agent: model synthesizes ONE response from whatever tool results<br/>came back over that single MCP connection — cite each source,<br/>in order: blast radius → SLA exposure → shared-conduit finding →<br/>runbook → advisory → on-call
     Agent-->>A365: response text
-    A365-->>User: "Blast radius: VPN-ACME-CORP + VPN-BIGBANK ($75k/hr exposure)...<br/>⚠️ Non-obvious: FIBRE-02 shares CONDUIT-SYD-MEL-INLAND...<br/>Runbook: reroute via Brisbane... On-call: ..."
+    A365-->>Bot: response text
+    Bot-->>User: "Blast radius: VPN-ACME-CORP + VPN-BIGBANK ($75k/hr exposure)...<br/>⚠️ Non-obvious: FIBRE-02 shares CONDUIT-SYD-MEL-INLAND...<br/>Runbook: reroute via Brisbane... On-call: ..."
 ```
 
 **Key point this diagram must make clear**: there is exactly **one** MCP tool
