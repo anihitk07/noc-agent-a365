@@ -140,6 +140,39 @@ directly in the Fabric portal.
 |---|---|---|---|
 | Even after the capacity fix and after picking `NOCTopologyLakehouse` in the "Select data from Fabric" picker, `Refresh` on the `GraphModel` item still fails (5 consecutive attempts, latest at `00:46:32` UTC) with `GraphNotRefreshable`; separately, the user cannot add any node in the ontology's graph/query view in the portal | Called `getDefinition` on **two different items** to compare: (1) the `Ontology` item (`bcf3566c-...`) — its `EntityTypes/*/definition.json` and matching `DataBindings/*.json` files ARE correctly present and correctly wired (e.g. `EntityTypes/1` = `CoreRouter` is bound via `dataBindingConfiguration.sourceTableProperties` to `itemId: 84f676f5-...` = `NOCTopologyLakehouse`, `sourceTableName: DimCoreRouter`, with all 6 property bindings using the correct PascalCase source columns `RouterId, City, Region, Vendor, Model, FirmwareVersion`). (2) The separate `GraphModel` item (`47e46d66-...`, the thing `Refresh` jobs actually target) — its `getDefinition` (an **async** call: `POST .../getDefinition` returns `202` + `Location`/`Retry-After` headers pointing to a Power BI-hosted operations endpoint, poll until `Succeeded` then `GET .../result`) returned: `dataSources.json` correctly lists all 19 Delta tables from `NOCTopologyLakehouse` by their real OneLake `abfss://` paths — **but** `graphDefinition.json` is `{"nodeTables": [], "edgeTables": []}` and `graphType.json` is `{"nodeTypes": [], "edgeTypes": []}` — **both completely empty**. | The Ontology's schema (entity/relationship *type* definitions) and its data-source *bindings* are correctly configured and were likely set up programmatically/via an earlier script/import — but that configuration was **never translated into the actual `GraphModel` item's own node/edge type list**, which is the structure `Refresh` and the query/explore UI actually operate on. In Fabric's Ontology UI, this translation step normally happens when a user manually drags/adds each entity type onto the graph canvas as a node, assigns it to a data source, and clicks **Save** — that manual canvas step was never completed (or was lost), leaving `graphType.json`/`graphDefinition.json` empty even though the underlying schema/bindings exist. This is exactly consistent with "I am not able to add any node" — with zero existing node types in the graph, and if the canvas's "add node" flow is itself failing/greyed out, that's the next thing to isolate directly in the portal. | **In the Fabric portal**, open `NOCNetworkOntology`'s graph/canvas view (not just the query view) and, for each of the 8 entity types, explicitly **add it as a node on the canvas**, pick `NOCTopologyLakehouse` → the correct table (matching the bindings already confirmed above, e.g. `CoreRouter` → `DimCoreRouter`) if prompted, then repeat for relationship types as edges, and **Save**. Only after `graphType.json`/`graphDefinition.json` show non-empty node/edge types will `Refresh` have anything to build. If the canvas's own "add node" action is failing or unresponsive (matching the user's exact complaint), that's a distinct portal-UI-level bug to report to Fabric support directly, since the underlying data/schema/capacity are all independently confirmed healthy at this point. |
 
+## RESOLVED: manually rebuilding all 8 nodes + 6 edges fixed Fabric IQ end-to-end
+
+After the user manually recreated all 8 node types and 6 edge types on the
+`NOCNetworkOntology` graph canvas (per the build table above, using
+verified real Delta table column names) and clicked Save, the next `Refresh`
+job **succeeded** (`status: Completed`, no more `GraphNotRefreshable`).
+Confirmed via `getDefinition` that `graphType.json`/`graphDefinition.json`
+now contain all 8 node types and 6 edge types with correct property/key
+mappings. Directly re-tested the Data Agent's raw MCP endpoint (bypassing
+the app) with the exact same queries that failed throughout this
+investigation:
+- `"List all core routers with their city and vendor."` → returned 3 real
+  routers (CORE-MEL-01/Cisco, CORE-BNE-01/Juniper, CORE-SYD-01/Cisco) —
+  the simplest possible query, previously 100% failing, now works.
+- `"Which transport links originate at CORE-SYD-01, and what conduit do
+  they ride on?"` → correctly traversed the `ORIGINATES_AT` and `RIDES_ON`
+  edges, returning 3 real links and correctly identifying that
+  `LINK-SYD-MEL-FIBRE-01` and `-02` share the same conduit
+  (`CONDUIT-SYD-MEL-INLAND`) — the exact shared-conduit blast-radius
+  scenario used in the demo's incident-response test cases.
+
+**Final root cause, end to end**: the Ontology item's schema and data
+bindings were always correctly configured, but the separate `GraphModel`
+item that Fabric IQ/the Data Agent actually queries against had never had
+its own node/edge types created — this is a manual, one-time step in the
+Fabric portal's graph canvas that isn't inferred automatically from the
+Ontology's schema, nor from loading data sources, nor from Refresh alone.
+Once created and saved, `Refresh` populates real graph data and both
+simple and relationship/traversal queries work correctly. The capacity
+auto-pause encountered earlier in this investigation was a real, separate
+contributing issue (now also fixed) but was not sufficient on its own to
+explain the failure — both fixes were required.
+
 ## Work IQ `ask` returns no on-call/bridge results, surfaces the bot's own prior Teams chat instead
 
 | Symptom | Cause | Fix |
