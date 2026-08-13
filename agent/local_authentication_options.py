@@ -1,9 +1,6 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 
-"""Local Authentication Options for development/testing scenarios.
-
-Ported verbatim from microsoft/iq-samples/refund-agent-a365/agent/local_authentication_options.py.
-"""
+"""Local Authentication Options for development/testing scenarios."""
 
 import os
 from dataclasses import dataclass

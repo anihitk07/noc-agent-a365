@@ -80,11 +80,9 @@ sequenceDiagram
 
 ## 3. The 5 narrative beats this sequence must produce
 
-Ported from `PathfinderIQ-Demo-Version`'s hardened Sydney narrative
-(`docs/SCENARIO_NARRATIVE.md`, capability C19). A correct end-to-end run must
-surface all five, each traceable to a real tool call (verified via App
-Insights traces in the `verify-e2e` step, not asserted from the model's
-unaided knowledge):
+A correct end-to-end run must surface all five, each traceable to a real
+tool call (verified via App Insights traces in the `verify-e2e` step, not
+asserted from the model's unaided knowledge):
 
 1. **Blast radius** — `VPN-ACME-CORP` + `VPN-BIGBANK` depend on the cut link
    (Fabric IQ).

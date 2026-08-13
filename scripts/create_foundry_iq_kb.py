@@ -3,8 +3,7 @@
 Create the Foundry IQ knowledge source + knowledge base over the NOC corpus
 (runbooks, tickets, equipment specs, infra specs).
 
-Pattern follows iq-samples/refund-agent-a365/scripts/create_foundry_iq_kb.py and
-the Build26 LAB532 "File Knowledge Source" notebook:
+Pattern follows the Build26 LAB532 "File Knowledge Source" notebook:
   1. Create a FILE knowledge source per corpus folder (service auto-chunks + embeds).
   2. Upload every doc in data/{runbooks,tickets,equipment_specs,infra_specs}.
   3. Create one knowledge base (answerSynthesis) spanning all four sources.

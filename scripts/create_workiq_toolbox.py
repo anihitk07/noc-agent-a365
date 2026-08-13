@@ -7,8 +7,8 @@ interactive browser consent per call. That works fine in the Foundry
 playground (a human is present to click "Allow") but fails in Teams/A365 --
 a non-interactive caller -- with a repeating `oauth_consent_request` loop, and
 the agent silently falls back to hallucinating an answer instead of calling
-Work IQ. See docs/DEPLOYMENT.md and iq-samples/refund-agent-a365's
-TROUBLESHOOTING.md for the full writeup.
+Work IQ. See docs/DEPLOYMENT.md and docs/TROUBLESHOOTING.md for the full
+writeup.
 
 The fix is to create the connection directly against ARM with
 `authType: UserEntraToken` (OBO identity passthrough: Foundry forwards the

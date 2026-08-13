@@ -3,7 +3,6 @@
 
 """Generic Agent Host Server — Hosts agents implementing AgentInterface.
 
-Ported near-verbatim from microsoft/iq-samples/refund-agent-a365/agent/host_agent_server.py.
 This layer is agent-agnostic: it knows nothing about NOC, IQ tools, or MAF. It
 just wires the A365 hosting SDK (AgentApplication/Authorization/CloudAdapter)
 around whatever AgentInterface implementation it is given (here, NocAgent).

@@ -3,13 +3,11 @@
 """
 NOC Agent — MAF orchestrator with four IQ tools (Foundry IQ, Fabric IQ, Web IQ, Work IQ).
 
-Unlike microsoft/iq-samples/refund-agent-a365's agent.py (which bridges to a
-pre-built Foundry agent over the OpenAI Responses API), this agent runs an
-in-process Microsoft Agent Framework (MAF) `Agent` directly, per the pattern
-demonstrated in microsoft/iqdeepdive's src/agent-workiq-maf and
-agent-foundryiq-mcp samples: a single `Agent` with multiple tools bound, where
-the model's own tool-selection performs the routing across IQ surfaces. No
-hand-rolled dispatcher is needed.
+This agent runs an in-process Microsoft Agent Framework (MAF) `Agent`
+directly (not a bridge to a pre-built, persisted Foundry Agent object): a
+single `Agent` with multiple tools bound, where the model's own
+tool-selection performs the routing across IQ surfaces. No hand-rolled
+dispatcher is needed.
 
 All four IQ tools are bundled behind a single **Foundry Toolbox** MCP
 endpoint (`project.toolboxes.create_version(...)`, one `MCPToolboxTool` per

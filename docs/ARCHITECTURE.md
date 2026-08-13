@@ -9,9 +9,10 @@ surfaces — **Foundry IQ**, **Fabric IQ**, **Web IQ**, and **Work IQ** — as M
 tools. The model's own tool-selection performs the routing; there is no
 hand-rolled dispatcher.
 
-The demo scenario (ported from `PathfinderIQ-Demo-Version`) is a Sydney↔Melbourne
-fibre-cut incident. See [SCENARIO_NARRATIVE.md](SCENARIO_NARRATIVE.md) for the
-full narrative and [SEQUENCE.md](SEQUENCE.md) for the runtime call sequence.
+The demo scenario is a Sydney↔Melbourne fibre-cut incident. See
+[SEQUENCE.md](SEQUENCE.md) §3 for the 5 narrative beats a correct
+end-to-end run must surface, and the rest of that doc for the runtime
+call sequence.
 
 ## Components
 
@@ -64,10 +65,11 @@ Teams / M365 Copilot
 | **Work IQ** | On-call roster, bridge chatter, change approvals | **`UserEntraToken`** (OBO passthrough) | Reads the *user's* Teams/Outlook data; app-only auth is blocked (`AADSTS82001`) |
 
 Picking the wrong auth type per surface is the single most common integration
-mistake in this class of solution (see `iq-samples/refund-agent-a365/TROUBLESHOOTING.md`
-for the concrete failure modes). Getting Web IQ onto `UserEntraToken`, or Work
-IQ / Fabric IQ onto `CustomKeys`/service credentials, both silently degrade to
-either wrong-user data or hard failures.
+mistake in this class of solution (see `docs/TROUBLESHOOTING.md` for the
+concrete failure modes hit in this repo). Getting Web IQ onto
+`UserEntraToken`, or Work IQ / Fabric IQ onto `CustomKeys`/service
+credentials, both silently degrade to either wrong-user data or hard
+failures.
 
 ## Why one MAF agent instead of four specialist agents
 
