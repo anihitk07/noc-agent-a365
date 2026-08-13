@@ -9,6 +9,7 @@ sequenceDiagram
     participant Az as Azure (az / azd)
     participant RG as New Resource Group
     participant Fab as Fabric (tenant)
+    participant Agent as App Service (NocAgent)
     participant A365 as A365 CLI
 
     Op->>Az: az login / azd auth login (target subscription)
@@ -33,8 +34,13 @@ sequenceDiagram
     Fab-->>Op: FABRIC_DATA_AGENT_MCP_URL
 
     Op->>Az: Portal — add Web IQ connection (CustomKeys/x-apikey) [done via Bicep if key supplied]
-    Op->>Az: Portal — add Work IQ connection (UserEntraToken) + Foundry toolbox
+    Op->>Az: python scripts/create_workiq_toolbox.py  (WorkIQ connection, authType=UserEntraToken)
+    Op->>Az: ARM PUT fabric-iq-connection  (authType=UserEntraToken, see DEPLOYMENT.md Sec4c)
     Op->>Az: azd deploy  (pushes agent/ to the App Service)
+    Az->>Agent: App Service cold-starts NocAgent.initialize()
+    Agent->>Az: resolve all 4 project connections (kb-mcp, web-iq, fabric-iq, WorkIQ)
+    Agent->>Az: project.toolboxes.create_version("noc-iq-toolbox", tools=[4x MCPToolboxTool])
+    Note over Agent,Az: One Foundry Toolbox bundles all 4 IQ connections behind ONE MCP endpoint.<br/>Rebuilt fresh on every app start — no manual toolbox step in the portal.
 
     Op->>A365: a365 setup all  (mint teammate identity + blueprint permissions)
     A365->>A365: Register app, create agentic user, apply customBlueprintPermissions
@@ -49,34 +55,59 @@ sequenceDiagram
     participant User as Teams user
     participant A365 as A365 host (host_agent_server.py)
     participant Agent as NocAgent (agent.py, MAF)
-    participant FIQ as Foundry IQ (KB MCP)
-    participant FabIQ as Fabric IQ (Data Agent MCP)
-    participant WebIQ as Web IQ (web MCP)
-    participant WorkIQ as Work IQ (FoundryToolbox)
+    participant TB as noc-iq-toolbox<br/>(ONE Foundry Toolbox MCP endpoint)
+    participant FIQ as Foundry IQ connection
+    participant FabIQ as Fabric IQ connection
+    participant WebIQ as Web IQ connection
+    participant WorkIQ as Work IQ connection
 
     User->>A365: "What's the blast radius of the SYD-MEL fibre cut?"
     A365->>A365: on_message handler, start typing indicator
     A365->>Agent: process_user_message(message, auth, auth_handler_name, context)
     Agent->>A365: auth.exchange_token(scopes=[ai.azure.com/.default], AGENTIC)
     A365-->>Agent: user OBO token
-    Agent->>Agent: build per-turn Fabric IQ + Work IQ tools from OBO token
+    Agent->>Agent: _build_turn_tool() — build ONE fresh MCPStreamableHTTPTool<br/>this turn, pointed at the noc-iq-toolbox MCP URL,<br/>with the user's OBO token injected as the Authorization header
 
-    Agent->>Agent: agent.run(history, tools=[fabric_iq, work_iq_toolbox])
-    Note over Agent: default tools (Foundry IQ, Web IQ) always available,<br/>per-turn tools merged for this call only
+    Agent->>Agent: agent.run(history, tools=[noc-iq-toolbox])
+    Note over Agent,TB: Single Responses API call, ONE MCP tool exposed to the model.<br/>The toolbox — not the agent — fans out to whichever of the<br/>4 bundled IQ connections the model decides to invoke — there is<br/>no separate direct call per IQ surface and no hand-rolled<br/>sequencing/aggregation logic in agent.py.
 
-    Agent->>FabIQ: network-ontology tool call — blast radius for LINK-SYD-MEL-FIBRE-01
-    FabIQ-->>Agent: dependent services (VPN-ACME-CORP, VPN-BIGBANK), shared conduit (CONDUIT-SYD-MEL-INLAND)
-    Agent->>FIQ: knowledge-base tool call — fibre-cut runbook + SLA policy terms
-    FIQ-->>Agent: runbook steps, SLA $/hr penalty terms
-    Agent->>WebIQ: web-search tool call — vendor/carrier advisory for the affected route
-    WebIQ-->>Agent: live advisory (if any)
-    Agent->>WorkIQ: Microsoft 365 tool call — on-call roster / bridge chatter
-    WorkIQ-->>Agent: on-call engineer, active bridge summary
+    Agent->>TB: MCP initialize + tools/list (one HTTP connection, this turn)
+    TB-->>Agent: 4 tool definitions advertised: foundry-iq, web-iq, fabric-iq, work-iq
 
-    Agent->>Agent: synthesize response — cite each source, in order:<br/>blast radius → SLA exposure → shared-conduit finding → runbook → advisory → on-call
+    par Model decides which of the 4 to call, in whatever order/count it needs
+        Agent->>TB: call tool "fabric-iq" — blast radius for LINK-SYD-MEL-FIBRE-01
+        TB->>FabIQ: forwards call, Authorization: <OBO token> (UserEntraToken passthrough)
+        FabIQ-->>TB: dependent services (VPN-ACME-CORP, VPN-BIGBANK), shared conduit (CONDUIT-SYD-MEL-INLAND)
+        TB-->>Agent: tool result
+    and
+        Agent->>TB: call tool "foundry-iq" — fibre-cut runbook + SLA policy terms
+        TB->>FIQ: forwards call (service-credentialed connection)
+        FIQ-->>TB: runbook steps, SLA $/hr penalty terms
+        TB-->>Agent: tool result
+    and
+        Agent->>TB: call tool "web-iq" — vendor/carrier advisory for the affected route
+        TB->>WebIQ: forwards call, x-apikey (CustomKeys)
+        WebIQ-->>TB: live advisory (if any)
+        TB-->>Agent: tool result
+    and
+        Agent->>TB: call tool "work-iq" — on-call roster / bridge chatter
+        TB->>WorkIQ: forwards call, Authorization: <OBO token> (UserEntraToken passthrough)
+        WorkIQ-->>TB: on-call engineer, active bridge summary
+        TB-->>Agent: tool result
+    end
+
+    Agent->>Agent: model synthesizes ONE response from whatever tool results<br/>came back over that single MCP connection — cite each source,<br/>in order: blast radius → SLA exposure → shared-conduit finding →<br/>runbook → advisory → on-call
     Agent-->>A365: response text
     A365-->>User: "Blast radius: VPN-ACME-CORP + VPN-BIGBANK ($75k/hr exposure)...<br/>⚠️ Non-obvious: FIBRE-02 shares CONDUIT-SYD-MEL-INLAND...<br/>Runbook: reroute via Brisbane... On-call: ..."
 ```
+
+**Key point this diagram must make clear**: there is exactly **one** MCP tool
+attached to the agent per turn (`noc-iq-toolbox`), and exactly **one**
+`agent.run()` model call. The 4 IQ surfaces are connections *behind* that one
+Toolbox, not 4 separate tools the agent code calls in sequence — the `par`
+block above shows the model's own tool-selection deciding which (and how
+many) of the 4 to invoke through that single MCP channel; nothing in
+`agent.py` iterates over the 4 tools or aggregates their results itself.
 
 ## 3. The 5 narrative beats this sequence must produce
 
