@@ -3,6 +3,45 @@
 Known gotchas surfaced while researching and building this solution, recorded
 here so `fix-loop` doesn't have to rediscover them.
 
+## Reference: manual node/edge build table for `NOCNetworkOntology`'s graph canvas
+
+The Ontology item's schema and data bindings were correct all along (see
+"CONFIRMED, CONCRETE GAP" entry below), but the `GraphModel` item itself had
+zero node/edge types defined and required manually recreating them one-by-one
+in the Fabric portal's graph canvas (`Add node` / `Add edge` toolbar buttons).
+This table was derived directly from the ontology's ground-truth
+`EntityTypes/*` and `RelationshipTypes/*` definitions (via `getDefinition`)
+so it can be rebuilt exactly if the graph ever needs to be recreated again.
+
+**Nodes** (`Add node` x8):
+
+| Node label | Source table | Key column | Other properties (label → source column) |
+|---|---|---|---|
+| CoreRouter | DimCoreRouter | RouterId | city→City, region→Region, vendor→Vendor, model→Model, firmwareVersion→FirmwareVersion |
+| TransportLink | DimTransportLink | LinkId | linkType→LinkType, capacityGbps→CapacityGbps, sourceRouterId→SourceRouterId, targetRouterId→TargetRouterId |
+| PhysicalConduit | DimPhysicalConduit | ConduitId | routeDescription→RouteDescription, materialType→MaterialType, installedYear→InstalledYear |
+| AmplifierSite | DimAmplifierSite | SiteId | location→Location, installedYear→InstalledYear, lastCalibration→LastCalibration |
+| Service | DimService | ServiceId | serviceType→ServiceType, customerName→CustomerName, customerCount→CustomerCount, activeUsers→ActiveUsers |
+| SLAPolicy | DimSLAPolicy | SLAPolicyId | serviceId→ServiceId, availabilityPct→AvailabilityPct, maxLatencyMs→MaxLatencyMs, penaltyPerHourUSD→PenaltyPerHourUSD, tier→Tier |
+| MPLSPath | DimMPLSPath | PathId | pathType→PathType |
+| Advisory | DimAdvisory | AdvisoryId | vendorName→VendorName, severity→Severity, title→Title |
+
+**Edges** (`Add edge` x6, only after all 8 nodes above exist and are saved):
+
+| Edge label | Source node | Target node | Binding table | Source key col | Target key col |
+|---|---|---|---|---|---|
+| ORIGINATES_AT | TransportLink | CoreRouter | DimTransportLink | SourceRouterId | RouterId |
+| TERMINATES_AT | TransportLink | CoreRouter | DimTransportLink | TargetRouterId | RouterId |
+| RIDES_ON | TransportLink | PhysicalConduit | FactConduitMapping | LinkId | ConduitId |
+| AMPLIFIES | AmplifierSite | TransportLink | FactAmplifierMapping | LinkId (site table) | LinkId (link table) |
+| COVERS | SLAPolicy | Service | DimSLAPolicy | ServiceId | ServiceId |
+| AFFECTS | Advisory | CoreRouter | FactAdvisoryMapping | RouterId | RouterId |
+
+Workflow: create all 8 nodes → **Save** → create all 6 edges → **Save** →
+**Refresh** the `GraphModel` item. Only after nodes/edges are defined does
+`Refresh` have anything to build (see the two entries below for the
+diagnostic trail that led here).
+
 ## Architecture change: moved off the local MCP client entirely (all 4 tools)
 
 The entries below (hang / shared-stack corruption / `BaseExceptionGroup`
