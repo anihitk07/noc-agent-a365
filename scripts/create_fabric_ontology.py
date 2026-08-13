@@ -15,7 +15,9 @@ This script:
    COVERS, AFFECTS) modelled on microsoft-iq-solution-accelerator's
    RetailSupplyChainOntologyModel.Ontology shape.
 
-Environment variables (from .env, written by azd postprovision):
+Environment variables (from the repo-root .env -- see docs/DEPLOYMENT.md §2b
+for how to generate it via `azd env get-values`; there is no azd
+postprovision hook in this repo):
   FABRIC_WORKSPACE_ID    - Existing Fabric workspace GUID (optional; created if absent)
   FABRIC_CAPACITY_ID     - Fabric capacity GUID or ARM resource ID (for workspace creation)
   FABRIC_TENANT_ID       - Required Microsoft Entra tenant ID for Fabric auth

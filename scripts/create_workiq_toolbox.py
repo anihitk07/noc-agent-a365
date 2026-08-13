@@ -20,18 +20,15 @@ needed here because UserEntraToken has no credential of its own to provision).
 
 Steps:
   1. PUT the Foundry project connection "WorkIQ" with authType=UserEntraToken
-     (idempotent -- PUT again to update if it already exists).
-  2. Create a toolbox version containing a WorkIQPreviewToolboxTool bound to
-     that connection, and promote it to the default version.
+     (idempotent -- PUT again to update if it already exists). This is the
+     ONLY thing this script needs to do: agent.py resolves Work IQ purely by
+     looking up this connection by name and wrapping it into its own
+     "noc-iq-toolbox" (see agent/agent.py); it does not use or need any
+     separate, dedicated Work IQ toolbox.
 
 Required env (from `azd env get-values` / .env):
   AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZURE_AI_ACCOUNT_NAME,
-  AZURE_AI_PROJECT_NAME, AZURE_TENANT_ID, AZURE_AI_PROJECT_ENDPOINT (or
-  FOUNDRY_PROJECT_ENDPOINT)
-
-Optional env:
-  WORKIQ_TOOLBOX_NAME (default "work-iq-tools", must match
-  CUSTOM_FOUNDRY_WORKIQ_TOOLBOX_NAME / agent/agent.py's WORKIQ_TOOLBOX_NAME)
+  AZURE_AI_PROJECT_NAME, AZURE_TENANT_ID
 """
 
 import os
@@ -39,8 +36,6 @@ import time
 from pathlib import Path
 
 import httpx
-from azure.ai.projects import AIProjectClient
-from azure.ai.projects.models import WorkIQPreviewToolboxTool
 from azure.identity import AzureDeveloperCliCredential
 from dotenv import load_dotenv
 
@@ -139,42 +134,12 @@ def put_workiq_connection(
     log_message(f"[OK] Foundry connection '{CONNECTION_NAME}' created/updated (authType={auth_type}).")
 
 
-def create_toolbox(*, project_endpoint: str, tenant_id: str, toolbox_name: str) -> None:
-    """Create and promote a toolbox version containing the Work IQ tool."""
-    credential = AzureDeveloperCliCredential(tenant_id=tenant_id)
-    project = AIProjectClient(endpoint=project_endpoint, credential=credential)
-    version = project.toolboxes.create_version(
-        name=toolbox_name,
-        tools=[
-            WorkIQPreviewToolboxTool(
-                name="work_iq",
-                description=(
-                    "Answer questions about the signed-in NOC on-call engineer's "
-                    "Microsoft 365 mail, Teams chats/bridge threads, meetings, "
-                    "and change-approval documents."
-                ),
-                project_connection_id=CONNECTION_NAME,
-            )
-        ],
-        description="Microsoft 365 work context tools for the NOC agent (Work IQ).",
-    )
-    project.toolboxes.update(name=toolbox_name, default_version=version.version)
-    log_message(f"[OK] Toolbox '{toolbox_name}' created; default version set to {version.version}.")
-
-
 def main() -> None:
     subscription_id = require_env("AZURE_SUBSCRIPTION_ID")
     resource_group = require_env("AZURE_RESOURCE_GROUP")
     account_name = require_env("AZURE_AI_ACCOUNT_NAME")
     project_name = require_env("AZURE_AI_PROJECT_NAME")
     tenant_id = require_env("AZURE_TENANT_ID")
-    project_endpoint = (
-        os.getenv("AZURE_AI_PROJECT_ENDPOINT", "").strip()
-        or os.getenv("FOUNDRY_PROJECT_ENDPOINT", "").strip()
-    )
-    if not project_endpoint:
-        raise RuntimeError("AZURE_AI_PROJECT_ENDPOINT or FOUNDRY_PROJECT_ENDPOINT is required.")
-    toolbox_name = os.getenv("WORKIQ_TOOLBOX_NAME", "work-iq-tools").strip()
 
     log_message("Creating Work IQ Foundry connection (authType=UserEntraToken)...")
     put_workiq_connection(
@@ -185,13 +150,10 @@ def main() -> None:
         tenant_id=tenant_id,
     )
 
-    log_message(f"Creating Work IQ toolbox '{toolbox_name}'...")
-    create_toolbox(project_endpoint=project_endpoint, tenant_id=tenant_id, toolbox_name=toolbox_name)
-
     log_message(
-        "\nDone. Set CUSTOM_FOUNDRY_WORKIQ_TOOLBOX_NAME="
-        f"{toolbox_name} in the App Service app settings if it differs from the "
-        "agent.py default ('work-iq-tools')."
+        "\nDone. agent.py resolves Work IQ by looking up this 'WorkIQ' project "
+        "connection directly (WORK_IQ_CONNECTION_NAME env var, default 'WorkIQ') "
+        "-- no separate toolbox or app setting is needed for this connection."
     )
 
 

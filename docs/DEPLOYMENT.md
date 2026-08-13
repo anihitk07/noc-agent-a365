@@ -6,8 +6,21 @@ publish to Teams / M365 Copilot via Agent 365 (A365). Every resource is new —
 nothing is reused from any other deployment.
 
 Prerequisites: `az` (Azure CLI), `azd` (Azure Developer CLI), `a365` (Agent
-365 CLI), Python 3.11+, and Git Bash (for the `.sh` helper scripts below —
-run these from **Git Bash on Windows**, not PowerShell/cmd).
+365 CLI), Python 3.11+, and a POSIX-ish shell for the `bash` code blocks below
+(Git Bash on Windows, or a native shell on macOS/Linux). There are no `.sh`
+helper scripts in this repo — every step below is either a CLI command or a
+`python scripts/*.py` script; the `bash` code fences are just for copy-paste
+convenience.
+
+> **Optional: automation service principal.** Every step below assumes an
+> interactive `az login`/`azd auth login` session. If you are instead driving
+> this guide from an unattended script/pipeline where an interactive browser
+> login isn't available, create your own service principal
+> (`az ad sp create-for-rbac --name "<your-name>-automation" --role Contributor
+> --scopes /subscriptions/<sub-id>/resourceGroups/rg-<AZURE_ENV_NAME>`,
+> created **after** step 2 provisions the resource group) and authenticate
+> `az`/`azd` with its credentials instead. This is not part of the deployment
+> architecture itself — delete the SP at teardown (§11.4) if you created one.
 
 ## 0. Configuration
 
@@ -50,6 +63,24 @@ This creates, in a new resource group (`rg-<AZURE_ENV_NAME>` by default):
 Capture the outputs — `azd env get-values` prints them all, including
 `AZURE_AI_PROJECT_ENDPOINT`, the Search endpoint, and the agent host name.
 
+## 2b. Export outputs to a root `.env` file (required before steps 3-6)
+
+**There is no `azd postprovision` hook in this repo** — `azd up` alone does
+**not** write any `.env` file. `scripts/create_fabric_ontology.py`,
+`create_fabric_data_agent.py`, and `create_workiq_toolbox.py` all
+`load_dotenv()` a root-level `.env`; `create_foundry_iq_kb.py` reads straight
+from `os.environ` and needs the values actually exported into the shell, not
+just present in a file. Do both in one step, from the repo root:
+
+```bash
+azd env get-values > .env
+set -a; source .env; set +a
+```
+
+Re-run this after any `azd up`/`azd provision` that changes infra outputs
+(e.g. if you re-run `azd up` in a later session), and before running any
+script in steps 3-6 in a fresh shell.
+
 ## 3. Foundry IQ — build the knowledge base
 
 ```bash
@@ -67,6 +98,7 @@ Requires the signed-in account to have a Fabric/Power BI license and be an
 admin (or Contributor) on the target capacity.
 
 ```bash
+cd scripts
 python create_fabric_ontology.py
 python create_fabric_data_agent.py
 ```
@@ -83,11 +115,14 @@ that ontology and prints `FABRIC_DATA_AGENT_MCP_URL`.
 ### 4a. Manually build the graph canvas (required — not automated)
 
 `create_fabric_ontology.py` only creates the `Ontology` item's schema and
-data-source **bindings**. The separate `GraphModel` item that Fabric IQ/the
-Data Agent actually queries against is **not** populated by that script, by
-loading data sources, or by running Refresh — its node/edge types must be
-created **manually, once**, on the Fabric portal's graph canvas, or every
-Fabric IQ query will fail with `GraphNotRefreshable` /
+data-source **bindings**. Creating the `Ontology` item auto-provisions a
+companion `GraphModel` item in the same workspace (visible in the workspace's
+item list as `<FABRIC_ONTOLOGY_NAME>_graph_<guid>`, distinct from the
+`Ontology` item itself) — this is the item Fabric IQ/the Data Agent actually
+queries against, and it is **not** populated by the script, by loading data
+sources, or by running Refresh. Its node/edge types must be created
+**manually, once**, on the Fabric portal's graph canvas, or every Fabric IQ
+query will fail with `GraphNotRefreshable` /
 `"Graph doesn't have valid content and cannot be refreshed."` This was the
 deepest root cause found during this deployment's troubleshooting (see
 `docs/TROUBLESHOOTING.md` "CONFIRMED, CONCRETE GAP" / "RESOLVED" entries).
@@ -142,6 +177,34 @@ See `docs/TROUBLESHOOTING.md`'s "Auth-type mistakes" section for how to find
 the agent identity/agent-user object ids (visible as `agentic_user_id` in
 Application Insights `traces` once a user has messaged the agent once).
 
+### 4c. Create the Fabric IQ Foundry project connection (required — not automated by any script)
+
+**Neither `create_fabric_ontology.py` nor `create_fabric_data_agent.py`
+creates a Foundry project connection.** They only touch Fabric-side
+resources (workspace, lakehouse, ontology, Data Agent). `agent.py` resolves
+Fabric IQ via `self._project_client.connections.get("fabric-iq-connection")`
+— if that connection doesn't exist, it's silently caught and skipped
+(Fabric IQ just never appears in the toolbox, no error at startup). Create
+it directly against ARM, mirroring the same `UserEntraToken` pattern
+`scripts/create_workiq_toolbox.py` uses for Work IQ:
+
+```bash
+FABRIC_DATA_AGENT_MCP_URL="<printed by create_fabric_data_agent.py in step 4, also in .env>"
+ARM_TOKEN=$(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)
+curl -s -X PUT \
+  "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/rg-$AZURE_ENV_NAME/providers/Microsoft.CognitiveServices/accounts/$AZURE_AI_ACCOUNT_NAME/projects/$AZURE_AI_PROJECT_NAME/connections/fabric-iq-connection?api-version=2025-06-01" \
+  -H "Authorization: Bearer $ARM_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"properties\": {\"authType\": \"UserEntraToken\", \"category\": \"RemoteTool\", \"target\": \"$FABRIC_DATA_AGENT_MCP_URL\", \"audience\": \"https://api.fabric.microsoft.com\", \"group\": \"GenericProtocol\", \"isSharedToAll\": false, \"metadata\": {\"type\": \"custom_MCP\"}}}"
+```
+
+The `audience` here must match the scope consented in §4b step 1
+(`https://api.fabric.microsoft.com`) so the OBO exchange mints a
+Fabric-scoped token for this connection's identity passthrough. Verify with
+a `GET` on the same URL — `properties.authType` should read
+`UserEntraToken`. (The account-rp connections API is intermittently flaky
+and can return a bare `500`; retry the `PUT` once or twice if so, same as
+`create_workiq_toolbox.py` does for Work IQ.)
+
 ## 5. Web IQ
 
 If `webIqApiKey` was set in step 2, the connection already exists — skip this
@@ -157,7 +220,7 @@ Work IQ has no dedicated SDK connection class, and the Foundry portal's
 but dead-ends in Teams/A365 (a non-interactive caller) with a repeating
 `oauth_consent_request` loop, silently falling back to a hallucinated answer.
 
-Use `scripts/create_workiq_toolbox.py` instead, which automates both steps
+Use `scripts/create_workiq_toolbox.py` instead, which creates the connection
 correctly:
 
 ```bash
@@ -165,19 +228,22 @@ cd scripts
 python create_workiq_toolbox.py
 ```
 
-This:
+This `PUT`s the Foundry project connection `WorkIQ` directly against ARM with
+`authType: UserEntraToken` (identity passthrough — Foundry forwards the
+caller's own Entra token via OBO and mints a Work IQ-scoped token; no
+client secret or Entra app registration required, unlike an OAuth2
+connection). Target `https://workiq.svc.cloud.microsoft/mcp`, audience
+`fdcc1f02-fc51-4226-8753-f668596af7f7` (`api://workiq.svc.cloud.microsoft`,
+scope `WorkIQAgent.Ask`).
 
-1. `PUT`s the Foundry project connection `WorkIQ` directly against ARM with
-   `authType: UserEntraToken` (identity passthrough — Foundry forwards the
-   caller's own Entra token via OBO and mints a Work IQ-scoped token; no
-   client secret or Entra app registration required, unlike an OAuth2
-   connection). Target `https://workiq.svc.cloud.microsoft/mcp`, audience
-   `fdcc1f02-fc51-4226-8753-f668596af7f7` (`api://workiq.svc.cloud.microsoft`,
-   scope `WorkIQAgent.Ask`).
-2. Creates and promotes a toolbox version named `work-iq-tools` containing a
-   `WorkIQPreviewToolboxTool` bound to that connection — this is the toolbox
-   `agent/agent.py`'s `FoundryToolbox` targets via
-   `{project_endpoint}/toolboxes/work-iq-tools/mcp?api-version=v1`.
+That connection is the *only* Work IQ resource `agent/agent.py` needs: it
+resolves Work IQ purely by looking up the `WorkIQ` project connection by name
+(`WORK_IQ_CONNECTION_NAME`, default `WorkIQ`) and wraps it into its own
+`noc-iq-toolbox` alongside the other three IQ connections (see
+`docs/ARCHITECTURE.md`) — there is no separate, dedicated Work IQ toolbox to
+create or reference. (An earlier version of this script also created a
+standalone `work-iq-tools` toolbox; that call was dead code for this
+architecture and has been removed — do not recreate it.)
 
 The account-rp preview connections API is intermittently flaky and returns a
 bare `500 InternalServerError`; the script retries with a short backoff and is
@@ -192,14 +258,13 @@ connection above.
 
 ### 6a. Grant Work IQ's Graph delegated-permission consent (required, one-time)
 
-Beyond the `authType: UserEntraToken` connection above, the Foundry
-`work-iq-tools` toolbox calls **Microsoft Graph** on the caller's behalf
-internally, and the Agent Identity needs tenant admin consent for the 7
-Graph delegated scopes Work IQ requires — without this, every Work IQ call
-fails with a generic MCP `"Cancelled via cancel scope"` error (the real
-`AADSTS65001` never surfaces in this app's own traces, since the failure
-happens server-side inside the toolbox). Run once, after `a365 setup all`
-(step 9) has created the Agent Identity:
+Beyond the `authType: UserEntraToken` connection above, Work IQ calls
+**Microsoft Graph** on the caller's behalf internally, and the Agent Identity
+needs tenant admin consent for the 7 Graph delegated scopes Work IQ requires —
+without this, every Work IQ call fails with a generic MCP `"Cancelled via
+cancel scope"` error (the real `AADSTS65001` never surfaces in this app's own
+traces, since the failure happens server-side inside Work IQ). Run once,
+after `a365 setup all` (step 9) has created the Agent Identity:
 
 ```bash
 GRAPH_SP_ID=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
@@ -207,20 +272,31 @@ az rest --method post --url https://graph.microsoft.com/v1.0/oauth2PermissionGra
   --body "{\"clientId\": \"<agent identity object id>\", \"consentType\": \"AllPrincipals\", \"resourceId\": \"$GRAPH_SP_ID\", \"scope\": \"Sites.Read.All Mail.Read People.Read.All OnlineMeetingTranscript.Read.All Chat.Read ChannelMessage.Read.All ExternalItem.Read.All\"}"
 ```
 
-## 7. Push IQ endpoints to the App Service
+## 7. App Service configuration — nothing extra to push
 
-Steps 3-6 print/`set_key()` into the local `.env` (`AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME`,
-`FABRIC_DATA_AGENT_MCP_URL`, `WEB_IQ_MCP_ENDPOINT`, `WEB_IQ_API_KEY`,
-`CUSTOM_FOUNDRY_WORKIQ_TOOLBOX_NAME`) but the **deployed** agent only reads
-its own App Service application settings, not this file. Push them explicitly:
+Steps 3-6 only create Foundry **project connections**
+(`kb-mcp-connection`, `web-iq-connection`, `fabric-iq-connection`, `WorkIQ`)
+and populate the Fabric ontology/Data Agent. `agent/agent.py` does **not**
+read `FABRIC_DATA_AGENT_MCP_URL`, `AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME`,
+`WEB_IQ_MCP_ENDPOINT`/`WEB_IQ_API_KEY`, or any Work IQ toolbox name as
+environment variables — it resolves all four IQ surfaces at startup purely by
+looking up the four **connection names** above through the Foundry project
+client (`FOUNDRY_IQ_CONNECTION_NAME`, `WEB_IQ_CONNECTION_NAME`,
+`FABRIC_IQ_CONNECTION_NAME`, `WORK_IQ_CONNECTION_NAME`, see
+`agent/.env.template`), all of which already default to the exact names
+created in steps 3-6. `infra/main.bicep` already sets every app setting the
+agent actually needs (`FOUNDRY_PROJECT_ENDPOINT`,
+`AZURE_AI_MODEL_DEPLOYMENT_NAME`, `AUTH_HANDLER_NAME`,
+`AGENT_RUN_TIMEOUT_SECONDS`, etc.) at provision time in step 2 — there is
+nothing left to push to the App Service after steps 3-6.
+
+Only if you deliberately named any connection differently than the defaults
+above do you need to override the corresponding `*_CONNECTION_NAME` app
+setting:
 
 ```bash
 az webapp config appsettings set -g "rg-$AZURE_ENV_NAME" -n "<webAppName>" --settings \
-  AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME=noc-knowledge-kb \
-  FABRIC_DATA_AGENT_MCP_URL="$FABRIC_DATA_AGENT_MCP_URL" \
-  WEB_IQ_MCP_ENDPOINT="https://api.microsoft.ai/v3/mcp" \
-  WEB_IQ_API_KEY="$WEB_IQ_API_KEY" \
-  CUSTOM_FOUNDRY_WORKIQ_TOOLBOX_NAME=work-iq-tools
+  FABRIC_IQ_CONNECTION_NAME="<your-custom-connection-name>"
 ```
 
 ## 8. Deploy the agent code
@@ -284,13 +360,23 @@ surfaces. Verify the fix by checking Application Insights `traces` for
 `"🔐 Using auth handler: AGENTIC"` at startup and the absence of the "No auth
 handler configured" warning on subsequent turns.
 
+## 9a. Generate the Teams app manifest package
+
+```bash
+a365 publish --aiteammate --agent-name <agent-name>
+```
+
+Generates `agent/manifest/manifest.zip` (gitignored — contains tenant-specific
+IDs baked in from step 9's `a365 setup all` run, so it must be regenerated,
+not reused, for each new tenant/environment). Run this after step 9
+completes successfully, before proceeding to §9b.
+
 ## 9b. Publish the Teams app package (manual, one-time, requires Global/Teams Admin)
 
-`a365 publish --aiteammate` (already run) produces
-`agent/manifest/manifest.zip` — a ready-to-upload custom Teams app package
-(gitignored, since it contains tenant-specific IDs). Uploading it to the org
-catalog via Microsoft Graph (`POST /appCatalogs/teamsApps`) was investigated
-and found to be **not fully automatable**:
+`agent/manifest/manifest.zip` (from §9a) is a ready-to-upload custom Teams
+app package. Uploading it to the org catalog via Microsoft Graph
+(`POST /appCatalogs/teamsApps`) was investigated and found to be **not fully
+automatable**:
 
 - A delegated token (e.g. via `az`/`azd`'s cached CLI login) needs the
   `AppCatalog.ReadWrite.All` scope, which Microsoft blocks for its own
@@ -317,12 +403,27 @@ Use the dedicated Agents surface instead:
 1. Go to `https://admin.microsoft.com` → **Settings → Integrated apps →
    Agents** (or **Agents → All agents**, depending on tenant UI version).
 2. Click **Upload custom agent** and upload `agent/manifest/manifest.zip`.
-3. Complete the wizard to **create an instance** — this is the step that
-   actually provisions the agentic teammate user
-   (`<agent-name>@<yourtenant>.onmicrosoft.com`) as a real M365 principal, not
-   just a catalog entry. `a365 setup all` already created the blueprint and
-   messaging endpoint; this step is what makes it installable/chattable in
-   Teams.
+3. In the upload wizard, choose the deployment scope — **"Just me"** (assign
+   to yourself only, fastest for a first smoke test) or **"Specific
+   users/groups"** / **"Everyone"** if the whole demo audience needs it
+   pre-installed. Complete the wizard to **create an instance** — this is
+   the step that actually provisions the agentic teammate user
+   (`<agent-name>@<yourtenant>.onmicrosoft.com`) as a real M365 principal,
+   not just a catalog entry. `a365 setup all` already created the blueprint
+   and messaging endpoint; this step is what makes it installable/chattable
+   in Teams. Provisioning/propagation can take a few minutes.
+4. **Find and open it in Teams**: for users the agent was deployed to
+   directly (not "Everyone"), it appears automatically in the Teams left
+   rail under **Apps → Built for your org** (may need a Teams client
+   restart/refresh) — no separate manual "install" step is needed for
+   directly-assigned users. If it doesn't appear, use Teams' **Apps → search
+   `<agent-name>`** and click **Add/Open** to trigger installation
+   explicitly.
+5. **First-message consent**: the very first message a given human user
+   sends will likely trigger a one-time OAuth/consent card (for the
+   `AGENTIC` auth handler's OBO token exchange) — approve it. Only after
+   this does that user's own agentic identity (`agentic_user_id`) get
+   created, which is the prerequisite for §9c's RBAC grants.
 
 ## 9c. Grant the agentic user identity the Foundry project RBAC roles
 
@@ -407,11 +508,12 @@ a365 teardown   # or remove the agentic user + blueprint via the M365 admin cent
 az group show --name "rg-$AZURE_ENV_NAME"   # confirm this is the right RG
 az group delete --name "rg-$AZURE_ENV_NAME" --yes --no-wait
 
-# 4. Remove the temporary automation service principal created during this
-#    session to restore non-interactive `az` CLI access (Contributor scoped
-#    only to the RG being deleted above): search Entra ID → App registrations
-#    for "noc-iq-demo-temp-automation" and delete it, or:
-az ad app delete --id "<temp-automation-app-id>"   # look it up: az ad app list --display-name "noc-iq-demo-temp-automation" --query "[].appId" -o tsv
+# 4. OPTIONAL -- only applies if you created a service principal for
+#    non-interactive `az` CLI automation (see "Optional: automation SP"
+#    note above §0). Not part of the deployment steps themselves --
+#    skip if you don't have one. If you do, remove it (search Entra ID →
+#    App registrations for its display name and delete it, or):
+az ad app delete --id "<automation-sp-app-id>"
 ```
 
 ## Cost note
