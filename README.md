@@ -1,5 +1,14 @@
 # NOC/NOA IQ Agent — Sydney Fibre-Cut Demo
 
+> ⚠️ **Proof-of-Concept — Not for Production Use**
+> This repository is demo/PoC code built to illustrate an end-to-end
+> Microsoft IQ (Foundry IQ, Fabric IQ, Web IQ, Work IQ) integration pattern.
+> It has not been hardened for production: security review, error handling,
+> scalability, monitoring, data-residency, and compliance controls suitable
+> for production workloads are out of scope. Do not deploy this code as-is
+> into a production environment — treat it as a reference implementation to
+> adapt, not a deployable product.
+
 A Microsoft Agent Framework (MAF) agent, hosted on Agent 365 (A365) for Teams
 / M365 Copilot, that triages network operations incidents using all four
 Microsoft IQ surfaces: **Foundry IQ**, **Fabric IQ**, **Web IQ**, and
