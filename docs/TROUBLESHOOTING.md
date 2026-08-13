@@ -28,14 +28,23 @@ so it can be rebuilt exactly if the graph ever needs to be recreated again.
 
 **Edges** (`Add edge` x6, only after all 8 nodes above exist and are saved):
 
-| Edge label | Source node | Target node | Binding table | Source key col | Target key col |
+| Edge label | Source table | Origin node | Origin key | Target node | Target key |
 |---|---|---|---|---|---|
-| ORIGINATES_AT | TransportLink | CoreRouter | DimTransportLink | SourceRouterId | RouterId |
-| TERMINATES_AT | TransportLink | CoreRouter | DimTransportLink | TargetRouterId | RouterId |
-| RIDES_ON | TransportLink | PhysicalConduit | FactConduitMapping | LinkId | ConduitId |
-| AMPLIFIES | AmplifierSite | TransportLink | FactAmplifierMapping | LinkId (site table) | LinkId (link table) |
-| COVERS | SLAPolicy | Service | DimSLAPolicy | ServiceId | ServiceId |
-| AFFECTS | Advisory | CoreRouter | FactAdvisoryMapping | RouterId | RouterId |
+| ORIGINATES_AT | DimTransportLink | TransportLink | LinkId | CoreRouter | SourceRouterId |
+| TERMINATES_AT | DimTransportLink | TransportLink | LinkId | CoreRouter | TargetRouterId |
+| RIDES_ON | FactConduitMapping | TransportLink | LinkId | PhysicalConduit | ConduitId |
+| AMPLIFIES | FactAmplifierMapping | AmplifierSite | SiteId | TransportLink | LinkId |
+| COVERS | DimSLAPolicy | SLAPolicy | SLAPolicyId | Service | ServiceId |
+| AFFECTS | FactAdvisoryMapping | Advisory | AdvisoryId | CoreRouter | RouterId |
+
+Column names above were verified directly against each table's real Delta
+log schema (`_delta_log/00000000000000000000.json` via the OneLake DFS API),
+not guessed from the ontology's binding JSON alone — the portal's "Origin
+key"/"Target key" pickers need a column **in the edge's own source table**
+whose values match the corresponding node's own key column: "Origin key" is
+usually the source table's own row identifier (matching the origin node's
+key), and "Target key" is the foreign-key-style column whose values match
+the target node's key.
 
 Workflow: create all 8 nodes → **Save** → create all 6 edges → **Save** →
 **Refresh** the `GraphModel` item. Only after nodes/edges are defined does
