@@ -12,7 +12,7 @@ run these from **Git Bash on Windows**, not PowerShell/cmd).
 ## 0. Configuration
 
 ```bash
-export AZURE_SUBSCRIPTION_ID="<your-subscription-id>"      # e.g. ME-M365CPI48286597-aganguly-1
+export AZURE_SUBSCRIPTION_ID="<your-subscription-id>"      # subscription id or name, e.g. from `az account list -o table`
 export AZURE_LOCATION="eastus2"
 export AZURE_ENV_NAME="noc-iq-demo"
 export WEB_IQ_API_KEY="<your Web IQ x-apikey value>"        # never commit this
@@ -80,6 +80,68 @@ that ontology and prints `FABRIC_DATA_AGENT_MCP_URL`.
 > object, not an ARM resource in the resource group. It must be deleted
 > separately at teardown (§7) or it will orphan after `az group delete`.
 
+### 4a. Manually build the graph canvas (required — not automated)
+
+`create_fabric_ontology.py` only creates the `Ontology` item's schema and
+data-source **bindings**. The separate `GraphModel` item that Fabric IQ/the
+Data Agent actually queries against is **not** populated by that script, by
+loading data sources, or by running Refresh — its node/edge types must be
+created **manually, once**, on the Fabric portal's graph canvas, or every
+Fabric IQ query will fail with `GraphNotRefreshable` /
+`"Graph doesn't have valid content and cannot be refreshed."` This was the
+deepest root cause found during this deployment's troubleshooting (see
+`docs/TROUBLESHOOTING.md` "CONFIRMED, CONCRETE GAP" / "RESOLVED" entries).
+
+1. Fabric portal → the `NOCNetworkOntology` item → open its **graph/canvas**
+   view (not the query view).
+2. **Add node** x8, using the "Reference: manual node/edge build table" at
+   the top of `docs/TROUBLESHOOTING.md` for the exact source table/key/
+   property mapping for each of `CoreRouter, TransportLink, PhysicalConduit,
+   AmplifierSite, Service, SLAPolicy, MPLSPath, Advisory`.
+3. **Save**, then **Add edge** x6 (`ORIGINATES_AT, TERMINATES_AT, RIDES_ON,
+   AMPLIFIES, COVERS, AFFECTS`), using the same table's Origin/Target key
+   columns — verified against real Delta table schemas, not just the raw
+   ontology JSON (see `docs/TROUBLESHOOTING.md` for why that distinction
+   matters).
+4. **Save**, then trigger **Refresh** from the portal (the Job Scheduler
+   REST API rejects ad-hoc `Refresh` triggers for this item type — use the
+   portal button). Confirm the job reaches `status: Completed`.
+
+> If the target capacity has auto-paused (Fabric capacities pause after a
+> period of inactivity), Refresh fails with `GraphNotRefreshable` even with a
+> correctly-built graph. Check `az resource show --ids <capacity resource
+> id> --query properties.state` and resume with `az resource invoke-action
+> --action resume --ids <capacity resource id>` first.
+
+### 4b. Grant the agent identity access to Fabric (required, one-time per environment)
+
+`a365 setup all` (step 9) creates an Entra **Agent Identity** with an
+auto-provisioned agent-user child identity, but that identity starts with
+**zero access to Fabric** — every Fabric IQ call will fail (`AADSTS65001:
+consent_required`, then, once consent is fixed, a Fabric workspace-RBAC
+403) until both of the following are done. Run these once the Agent Identity
+exists (after step 9), using an account with Global Admin / Fabric admin
+rights:
+
+```bash
+# 1. Tenant admin-consent grant for the Fabric/Power BI API's delegated
+#    scopes (there is no classic app registration object for an Agent
+#    Identity, so the portal's "API permissions" UI doesn't apply --
+#    grant directly via Graph).
+FABRIC_SP_ID=$(az ad sp show --id https://api.fabric.microsoft.com --query id -o tsv)
+az rest --method post --url https://graph.microsoft.com/v1.0/oauth2PermissionGrants \
+  --body "{\"clientId\": \"<agent identity object id>\", \"consentType\": \"AllPrincipals\", \"resourceId\": \"$FABRIC_SP_ID\", \"scope\": \"DataAgent.Read.All DataAgent.Execute.All\"}"
+
+# 2. Add the agent-user identity as a member of the Fabric workspace itself
+#    (tenant-wide API consent is separate from per-workspace RBAC).
+az rest --method post --url "https://api.fabric.microsoft.com/v1/workspaces/<workspaceId>/roleAssignments" \
+  --body "{\"principal\": {\"id\": \"<agent-user object id>\", \"type\": \"User\"}, \"role\": \"Contributor\"}"
+```
+
+See `docs/TROUBLESHOOTING.md`'s "Auth-type mistakes" section for how to find
+the agent identity/agent-user object ids (visible as `agentic_user_id` in
+Application Insights `traces` once a user has messaged the agent once).
+
 ## 5. Web IQ
 
 If `webIqApiKey` was set in step 2, the connection already exists — skip this
@@ -127,6 +189,23 @@ the correct config).
 `McpServers.Mail.All`, `McpServers.Teams.All`, `McpServersMetadata.Read.All`
 scopes — applied by `a365 setup all` (step 8), separate from the Foundry
 connection above.
+
+### 6a. Grant Work IQ's Graph delegated-permission consent (required, one-time)
+
+Beyond the `authType: UserEntraToken` connection above, the Foundry
+`work-iq-tools` toolbox calls **Microsoft Graph** on the caller's behalf
+internally, and the Agent Identity needs tenant admin consent for the 7
+Graph delegated scopes Work IQ requires — without this, every Work IQ call
+fails with a generic MCP `"Cancelled via cancel scope"` error (the real
+`AADSTS65001` never surfaces in this app's own traces, since the failure
+happens server-side inside the toolbox). Run once, after `a365 setup all`
+(step 9) has created the Agent Identity:
+
+```bash
+GRAPH_SP_ID=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
+az rest --method post --url https://graph.microsoft.com/v1.0/oauth2PermissionGrants \
+  --body "{\"clientId\": \"<agent identity object id>\", \"consentType\": \"AllPrincipals\", \"resourceId\": \"$GRAPH_SP_ID\", \"scope\": \"Sites.Read.All Mail.Read People.Read.All OnlineMeetingTranscript.Read.All Chat.Read ChannelMessage.Read.All ExternalItem.Read.All\"}"
+```
 
 ## 7. Push IQ endpoints to the App Service
 
@@ -240,7 +319,7 @@ Use the dedicated Agents surface instead:
 2. Click **Upload custom agent** and upload `agent/manifest/manifest.zip`.
 3. Complete the wizard to **create an instance** — this is the step that
    actually provisions the agentic teammate user
-   (`nocagent@M365CPI48286597.onmicrosoft.com`) as a real M365 principal, not
+   (`<agent-name>@<yourtenant>.onmicrosoft.com`) as a real M365 principal, not
    just a catalog entry. `a365 setup all` already created the blueprint and
    messaging endpoint; this step is what makes it installable/chattable in
    Teams.
@@ -332,7 +411,7 @@ az group delete --name "rg-$AZURE_ENV_NAME" --yes --no-wait
 #    session to restore non-interactive `az` CLI access (Contributor scoped
 #    only to the RG being deleted above): search Entra ID → App registrations
 #    for "noc-iq-demo-temp-automation" and delete it, or:
-az ad app delete --id "16af29e6-541c-4103-9913-640204d32e98"
+az ad app delete --id "<temp-automation-app-id>"   # look it up: az ad app list --display-name "noc-iq-demo-temp-automation" --query "[].appId" -o tsv
 ```
 
 ## Cost note

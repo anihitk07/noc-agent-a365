@@ -76,7 +76,10 @@ var fallbackDeployments = [
     }
     sku: {
       name: 'GlobalStandard'
-      capacity: 50
+      // 150K TPM -- raised from the original 50K default after live testing hit
+      // 429 rate_limit_exceeded (a turn using all 4 IQ tools can make up to 5
+      // LLM calls). See docs/TROUBLESHOOTING.md "429 rate_limit_exceeded".
+      capacity: 150
     }
   }
   {

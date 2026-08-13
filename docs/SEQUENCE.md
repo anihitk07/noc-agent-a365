@@ -11,7 +11,7 @@ sequenceDiagram
     participant Fab as Fabric (tenant)
     participant A365 as A365 CLI
 
-    Op->>Az: az login / azd auth login (ME-M365CPI48286597-aganguly-1)
+    Op->>Az: az login / azd auth login (target subscription)
     Op->>Az: azd up  (infra/main.bicep)
     Az->>RG: Create RG (tags: purpose=noc-iq-demo, DeleteBy=<date>)
     Az->>RG: Create AI Foundry account + project + gpt-5.4/text-embedding-3-small deployments
