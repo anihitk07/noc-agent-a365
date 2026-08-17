@@ -18,6 +18,7 @@ agent/.env
 # A365 CLI generated files (tenant/subscription-specific, never committed)
 a365.config.json
 a365.generated.config.json
+a365.generated.config.*.json
 agent/ToolingManifest.json
 manifest/
 

@@ -33,10 +33,13 @@ from microsoft_agents.hosting.core import (
     Authorization,
     ClaimsIdentity,
     MemoryStorage,
-    ProactiveOptions,
     TurnContext,
     TurnState,
 )
+# ProactiveOptions is defined under microsoft_agents.hosting.core.app.proactive but
+# is not re-exported from the top-level microsoft_agents.hosting.core package
+# (microsoft-agents-hosting-core==1.1.0), so it must be imported from the subpackage.
+from microsoft_agents.hosting.core.app import ProactiveOptions
 from microsoft_agents_a365.notifications.agent_notification import (
     AgentNotification,
     NotificationTypes,
