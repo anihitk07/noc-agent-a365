@@ -165,6 +165,18 @@ start/restart (no dedup/reuse logic). Acceptable for this demo; would
 accumulate garbage versions in a long-lived deployment — see
 `docs/TROUBLESHOOTING.md`.
 
+## Outbound notifications (separate, optional path)
+
+The 4-IQ Toolbox above is read-only and turn-initiated (a user asks, the
+agent answers). A separate, additive capability — `agent/notifications.py`
++ `POST /api/incidents/notify` — lets an external event (not a Teams
+message) trigger the agent to *originate* a multi-persona email broadcast,
+using the Agents SDK's own proactive-conversation feature
+(`AgentApplication.proactive.continue_conversation`) plus a direct Graph
+`sendMail` OBO call (bypassing the Toolbox, since Work IQ's connection is
+read-only). See [`docs/OUTBOUND_NOTIFICATIONS.md`](OUTBOUND_NOTIFICATIONS.md)
+for the full design, permission model, and current limitations.
+
 ## Infrastructure (`infra/`)
 
 All resources are provisioned brand-new into a dedicated resource group (no

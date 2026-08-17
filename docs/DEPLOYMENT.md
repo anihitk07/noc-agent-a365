@@ -272,6 +272,24 @@ az rest --method post --url https://graph.microsoft.com/v1.0/oauth2PermissionGra
   --body "{\"clientId\": \"<agent identity object id>\", \"consentType\": \"AllPrincipals\", \"resourceId\": \"$GRAPH_SP_ID\", \"scope\": \"Sites.Read.All Mail.Read People.Read.All OnlineMeetingTranscript.Read.All Chat.Read ChannelMessage.Read.All ExternalItem.Read.All\"}"
 ```
 
+### 6b. (Optional) Grant `Mail.Send` for outbound persona notifications
+
+**Only needed if you use `agent/notifications.py`'s outbound broadcast**
+(`POST /api/incidents/notify` — see docs/OUTBOUND_NOTIFICATIONS.md). This is
+a separate, additive consent — same Graph SP, same `oauth2PermissionGrants`
+call pattern as 6a, just re-run with `Mail.Send` appended to `scope`:
+
+```bash
+az rest --method post --url https://graph.microsoft.com/v1.0/oauth2PermissionGrants \
+  --body "{\"clientId\": \"<agent identity object id>\", \"consentType\": \"AllPrincipals\", \"resourceId\": \"$GRAPH_SP_ID\", \"scope\": \"Sites.Read.All Mail.Read Mail.Send People.Read.All OnlineMeetingTranscript.Read.All Chat.Read ChannelMessage.Read.All ExternalItem.Read.All\"}"
+```
+
+The agentic user identity (`nocagent@<tenant>`) has a real mailbox, so
+delegated `Mail.Send` works the same way delegated `Mail.Read` already does —
+no separate app registration or client-credential grant is required for this
+path. See docs/OUTBOUND_NOTIFICATIONS.md for the full permission-model
+explanation and its limits.
+
 ## 7. App Service configuration — nothing extra to push
 
 Steps 3-6 only create Foundry **project connections**

@@ -33,6 +33,7 @@ from microsoft_agents.hosting.core import (
     Authorization,
     ClaimsIdentity,
     MemoryStorage,
+    ProactiveOptions,
     TurnContext,
     TurnState,
 )
@@ -119,6 +120,12 @@ class GenericAgentHost:
             storage=self.storage,
             adapter=self.adapter,
             authorization=self.authorization,
+            # ponytail: same in-memory MemoryStorage as everything else in this
+            # PoC -- conversation references (needed for outbound persona
+            # broadcasts, see notifications.py) are lost on app restart.
+            # Upgrade to durable Storage (Cosmos/Blob) before this graduates
+            # past PoC; see docs/OUTBOUND_NOTIFICATIONS.md.
+            proactive=ProactiveOptions(storage=self.storage),
             **agents_sdk_config,
         )
         self.agent_notification = AgentNotification(self.agent_app)
@@ -206,6 +213,13 @@ class GenericAgentHost:
                     user_message = context.activity.text or ""
                     if not user_message.strip() or user_message.strip() == "/help":
                         return
+
+                    # Persist this conversation so a later incident-lifecycle
+                    # event (POST /api/incidents/notify) can resume it
+                    # proactively to send outbound persona emails -- see
+                    # notifications.py / docs/OUTBOUND_NOTIFICATIONS.md.
+                    # Stored keyed by context.activity.conversation.id.
+                    await self.agent_app.proactive.store_conversation(context)
 
                     logger.info(f"📨 {user_message}")
 
@@ -325,6 +339,45 @@ class GenericAgentHost:
                 req, req.app["agent_app"], req.app["adapter"]
             )
 
+        async def notify_incident(req: Request) -> Response:
+            """Proactive trigger: resume a stored conversation and send outbound
+            persona emails, with no inbound Teams message required this turn.
+
+            Body: {"conversation_id": "<id from a prior /api/messages turn>",
+                    "personas": ["executives", ...] (optional, default all 4),
+                    "incident_context": {<template placeholder values>}}
+
+            ponytail: caller-authenticated only by the same JWT middleware as
+            /api/messages (an Azure Monitor alert action group / Logic App
+            would call this with its own client-credential token) -- no extra
+            authorization check on WHICH conversation_id can be targeted.
+            Add one before exposing this beyond a single trusted caller.
+            """
+            if not self.agent_instance or not hasattr(self.agent_instance, "broadcast_incident_update"):
+                return json_response({"error": "Agent does not support outbound notifications"}, status=501)
+
+            body = await req.json()
+            conversation_id = body.get("conversation_id")
+            if not conversation_id:
+                return json_response({"error": "conversation_id is required"}, status=400)
+            incident_context = body.get("incident_context", {})
+            personas = body.get("personas")
+
+            results: dict = {}
+
+            async def _handler(context: TurnContext, _state: TurnState):
+                results.update(
+                    await self.agent_instance.broadcast_incident_update(
+                        incident_context, self.agent_app.auth, self.auth_handler_name, context, personas
+                    )
+                )
+
+            try:
+                await self.agent_app.proactive.continue_conversation(self.agent_app.adapter, conversation_id, _handler)
+            except KeyError:
+                return json_response({"error": f"Unknown conversation_id: {conversation_id}"}, status=404)
+            return json_response({"results": results})
+
         async def health(_req: Request) -> Response:
             return json_response(
                 {
@@ -363,6 +416,7 @@ class GenericAgentHost:
 
         app.router.add_post("/api/messages", entry_point)
         app.router.add_get("/api/messages", lambda _: Response(status=200))
+        app.router.add_post("/api/incidents/notify", notify_incident)
         app.router.add_get("/api/health", health)
 
         app["agent_configuration"] = auth_configuration

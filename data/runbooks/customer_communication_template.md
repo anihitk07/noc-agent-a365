@@ -88,6 +88,63 @@ A formal Root Cause Analysis (RCA) report will be provided within 5 business day
 
 ---
 
+---
+
+## Persona Templates (multi-audience incident lifecycle broadcast)
+
+Templates 1–3 above are the **customer-facing** voice. The four templates
+below are the **internal/partner-facing** voices used by
+`agent/notifications.py`'s `broadcast_incident_update()` — one send per
+persona per lifecycle stage (`detection` | `escalation` | `mitigation` |
+`resolution`), each with its own framing and level of technical detail.
+All use the same single-brace `{Variable}` substitution as Templates 1–3.
+
+### Persona: executives
+
+**Subject**: [{LifecycleStage}] {ServiceName} incident — business impact summary
+
+**Body**:
+
+{CustomerFacingImpactCount} customer(s)/service(s) affected. Current status:
+{CurrentStatus}. Business impact: {BusinessImpactSummary}. ETR:
+{ETR}. Full technical detail is not included in this summary — see the NOC
+channel for the live incident thread.
+
+### Persona: technical
+
+**Subject**: [{LifecycleStage}] {ServiceName} — {IncidentId} — technical detail
+
+**Body**:
+
+{RootCauseSummary}
+
+Telemetry: {TelemetrySummary}
+Remediation steps taken/in progress: {ActionSummary}
+Runbook reference: {RunbookReference}
+
+### Persona: venue
+
+**Subject**: [{LifecycleStage}] Service notice — {VenueName}
+
+**Body**:
+
+This notice is scoped to {VenueName} only. {VenueImpactDescription}.
+Estimated resolution: {ETR}. Contact NOC at noc@telco.example.com with
+questions specific to this site.
+
+### Persona: partners
+
+**Subject**: [{LifecycleStage}] {ServiceName} — SLA/contractual notice — {IncidentId}
+
+**Body**:
+
+Per our service agreement, this is a {LifecycleStage} notice for
+{ServiceId}. SLA status: {SLAStatus}. No internal telemetry or root-cause
+detail is included per the partner-tier restricted content policy — see
+`agent/notifications.py`'s `PERSONAS["partners"]` field allow-list.
+
+---
+
 ## Variable Reference
 
 | Variable | Source | Example |

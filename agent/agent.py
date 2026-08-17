@@ -121,6 +121,11 @@ NOC_TOOLBOX_NAME = os.getenv("NOC_TOOLBOX_NAME", "noc-iq-toolbox")
 # enough for all four tools -- no separate per-tool token exchange needed.
 FOUNDRY_USER_TOKEN_SCOPES = os.getenv("FOUNDRY_USER_TOKEN_SCOPES", "https://ai.azure.com/.default")
 
+# Separate OBO scope for outbound email (agent.notifications / broadcast_incident_update).
+# Requires delegated Mail.Send consented on the agentic identity the same way
+# Mail.Read already is for Work IQ -- see docs/OUTBOUND_NOTIFICATIONS.md.
+GRAPH_MAIL_TOKEN_SCOPES = os.getenv("GRAPH_MAIL_TOKEN_SCOPES", "https://graph.microsoft.com/.default")
+
 # ponytail: a native Foundry tool call still round-trips over the network
 # server-side, so agent.run() keeps its own wall-clock cap rather than being
 # able to hang the turn forever if Foundry's own tool-call plumbing stalls.
@@ -484,6 +489,35 @@ class NocAgent(AgentInterface):
         except Exception as exc:  # noqa: BLE001
             logger.error("❌ Notification error: %s", exc)
             return f"Sorry, I encountered an error processing the notification: {exc}"
+
+    # -------------------------------------------------------------------
+    # OUTBOUND MULTI-PERSONA EMAIL (proactive, not turn-initiated)
+    # -------------------------------------------------------------------
+
+    async def broadcast_incident_update(
+        self,
+        incident_context: dict,
+        auth: Authorization,
+        auth_handler_name: Optional[str],
+        context: TurnContext,
+        personas: Optional[list] = None,
+    ) -> dict:
+        """Send an incident-lifecycle update to one or more stakeholder personas.
+
+        Reachable only via a resumed (proactive) conversation -- see
+        host_agent_server.py's `POST /api/incidents/notify` route and
+        docs/OUTBOUND_NOTIFICATIONS.md. Requires the SAME OBO machinery as
+        Fabric IQ/Work IQ (`_exchange_user_token`), just scoped to
+        `https://graph.microsoft.com/.default` with delegated `Mail.Send`
+        consented instead of `Mail.Read` -- see docs/DEPLOYMENT.md.
+        """
+        from notifications import broadcast  # local import: optional feature, keep agent.py importable without it
+
+        graph_token = await self._exchange_user_token(auth, auth_handler_name, context, GRAPH_MAIL_TOKEN_SCOPES)
+        if not graph_token:
+            logger.error("❌ No Graph OBO token -- cannot send outbound notifications this turn")
+            return {}
+        return await broadcast(incident_context, graph_token, personas)
 
     # -------------------------------------------------------------------
     # OBO TOKEN EXCHANGE (Fabric Data Agent + Work IQ require user delegation)

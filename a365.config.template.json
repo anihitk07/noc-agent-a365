@@ -25,6 +25,7 @@
     {
       "resourceAppId": "ea9ffc3e-8a23-4a7d-836d-234d7c7565c1",
       "resourceName": "Agent 365 Tools",
+      "_comment": "McpServers.Mail.All only covers the Work IQ mailbox READ path (Mail.Read via oauth2PermissionGrants, see docs/DEPLOYMENT.md step 6a). Outbound send (docs/OUTBOUND_NOTIFICATIONS.md) needs the separate Mail.Send grant in step 6b -- it is not part of this scopes list.",
       "scopes": ["McpServers.Mail.All", "McpServers.Teams.All", "McpServersMetadata.Read.All"]
     },
     {

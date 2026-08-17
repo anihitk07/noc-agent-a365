@@ -28,9 +28,11 @@ Studio, no hand-rolled dispatcher.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for component-level detail,
 [`docs/SEQUENCE.md`](docs/SEQUENCE.md) for sequence diagrams (deployment +
-runtime turn, including the 5 narrative beats in §3), and
+runtime turn, including the 5 narrative beats in §3),
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for exact reproducible deployment
-steps.
+steps, and [`docs/OUTBOUND_NOTIFICATIONS.md`](docs/OUTBOUND_NOTIFICATIONS.md)
+for the (optional, additive) agent-initiated multi-persona email broadcast
+capability — separate from the 4 read-only IQ tools above.
 
 ## IQ auth-type matrix (read this before wiring connections)
 
