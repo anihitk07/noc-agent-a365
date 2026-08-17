@@ -381,13 +381,23 @@ handler configured" warning on subsequent turns.
 ## 9a. Generate the Teams app manifest package
 
 ```bash
-a365 publish --aiteammate --agent-name <agent-name>
+a365 publish --aiteammate
 ```
 
 Generates `agent/manifest/manifest.zip` (gitignored — contains tenant-specific
 IDs baked in from step 9's `a365 setup all` run, so it must be regenerated,
 not reused, for each new tenant/environment). Run this after step 9
 completes successfully, before proceeding to §9b.
+
+> **Do not pass `--agent-name` here.** The CLI's own help text says
+> `--agent-name` means "no config file is required" — in practice this makes
+> `a365 publish` skip `a365.config.json` entirely, including its
+> `deploymentProjectPath: "agent"` setting, so it looks for the manifest
+> template at `<repo-root>/manifest/manifest.json` instead of the real
+> location `agent/manifest/manifest.json` and fails with `ERROR: Manifest not
+> found`. Since `a365.config.json` already exists in this repo (created in
+> step 9), omit `--agent-name` so the CLI reads it and resolves the correct
+> path.
 
 ## 9b. Publish the Teams app package (manual, one-time, requires Global/Teams Admin)
 
