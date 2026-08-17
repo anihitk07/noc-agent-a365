@@ -88,9 +88,9 @@ def log_message(message: str):
 
 
 def _wait_for_extractor_result(extractor, timeout_seconds: int = 180, poll_seconds: float = 2.0):
-    """Block until an _LROResultExtractor (the ontology-preview SDK's
-    begin_create_ontology/begin_update_ontology_definition return type) has a
-    populated `.result` property.
+    """Block until an _LROResultExtractor (this SDK's begin_create_*/
+    begin_update_*/begin_load_* return type, across lakehouse/ontology
+    operations) has a populated `.result` property.
 
     Unlike a normal azure-core LROPoller, _LROResultExtractor has no blocking
     `.result()` method -- it is populated asynchronously via
@@ -187,9 +187,10 @@ def get_existing_workspace(name: str) -> dict:
 def create_lakehouse(workspace_id: str, name: str) -> dict:
     log_message(f"Creating lakehouse '{name}'...")
     try:
-        lakehouse = get_fabric_client().lakehouse.items.begin_create_lakehouse(
+        extractor = get_fabric_client().lakehouse.items.begin_create_lakehouse(
             workspace_id, CreateLakehouseRequest(display_name=name)
-        ).result()
+        )
+        lakehouse = _wait_for_extractor_result(extractor)
         log_message(f"Lakehouse created: {lakehouse.id}")
         return {"id": lakehouse.id, "displayName": lakehouse.display_name}
     except HttpResponseError as error:
@@ -225,7 +226,7 @@ def upload_to_onelake(workspace_id: str, lakehouse_id: str, filename: str, data:
 def load_table(workspace_id: str, lakehouse_id: str, table_name: str, filename: str) -> bool:
     log_message(f"Loading table '{table_name}' from {filename}...")
     try:
-        get_fabric_client().lakehouse.tables.begin_load_table(
+        extractor = get_fabric_client().lakehouse.tables.begin_load_table(
             workspace_id,
             lakehouse_id,
             table_name,
@@ -235,7 +236,8 @@ def load_table(workspace_id: str, lakehouse_id: str, table_name: str, filename: 
                 mode="Overwrite",
                 format_options=Csv(header=True, delimiter=","),
             ),
-        ).result()
+        )
+        _wait_for_extractor_result(extractor)
         log_message(f"Load completed for '{table_name}'")
         return True
     except HttpResponseError as error:
