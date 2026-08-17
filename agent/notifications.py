@@ -114,7 +114,9 @@ def _recipients_for(persona: str) -> list[str]:
     return [addr.strip() for addr in raw.split(",") if addr.strip()]
 
 
-async def send_persona_email(persona: str, context: dict, graph_token: str) -> bool:
+async def send_persona_email(
+    persona: str, context: dict, graph_token: str, cc_recipients: Optional[list[str]] = None
+) -> bool:
     """Send one persona's rendered email via Graph `sendMail`, on the agentic mailbox's own behalf."""
     recipients = _recipients_for(persona)
     if not recipients:
@@ -130,6 +132,8 @@ async def send_persona_email(persona: str, context: dict, graph_token: str) -> b
         },
         "saveToSentItems": True,
     }
+    if cc_recipients:
+        payload["message"]["ccRecipients"] = [{"emailAddress": {"address": addr}} for addr in cc_recipients]
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.post(
@@ -144,10 +148,21 @@ async def send_persona_email(persona: str, context: dict, graph_token: str) -> b
     return False
 
 
-async def broadcast(context: dict, graph_token: str, personas: Optional[list[str]] = None) -> dict[str, bool]:
-    """Send the incident-lifecycle update to every requested persona (default: all four)."""
+async def broadcast(
+    context: dict, graph_token: str, personas: Optional[list[str]] = None, cc_recipients: Optional[list[str]] = None
+) -> dict[str, bool]:
+    """Send the incident-lifecycle update to every requested persona (default: all four).
+
+    `cc_recipients` (e.g. the original incident-report sender, for the
+    `[INCIDENT:]`-tagged inbound-email trigger) is CC'd on every persona
+    email sent -- it does NOT change the persona's own NOTIFY_* recipient
+    list, which remains the real stakeholder distribution.
+    """
     targets = personas or list(PERSONAS)
-    return {persona: await send_persona_email(persona, context, graph_token) for persona in targets}
+    return {
+        persona: await send_persona_email(persona, context, graph_token, cc_recipients=cc_recipients)
+        for persona in targets
+    }
 
 
 def _demo() -> None:

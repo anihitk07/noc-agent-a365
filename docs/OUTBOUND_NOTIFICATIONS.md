@@ -277,15 +277,32 @@ This skips steps 1-2 above entirely (no Teams conversation/`conversation_id` nee
 
 1. Send an email to the agentic identity's monitored inbox (`nocagent@<tenant>`, the same address Work IQ's `Mail.Read` already watches) with:
    - **Subject**: anything (e.g. `Sydney fibre cut test`) — it is not read on this path.
-   - **Body**: the tag as the **first line**, then one `Field: value` pair per line, e.g.:
+   - **Body**: the tag as the **first line**, then one `Field: value` pair per line. The
+     field names must match what the persona templates in
+     `data/runbooks/customer_communication_template.md` actually substitute
+     (see its "Variable Reference" table + the 4 `### Persona:` sections) --
+     **not** arbitrary names like `Site`/`Severity`/`ETA`, which render as
+     literal unsubstituted `{Placeholder}` text since no persona template
+     uses those names. A body covering all 4 personas' fields:
      ```
      [INCIDENT:ESCALATION]
-     Site: SYD-CORE-04
-     Severity: SEV1
-     ETA: 45 minutes
+     ServiceName: Sydney-Melbourne Fibre
+     ServiceId: VPN-ACME-CORP
+     IncidentId: INC-TEST-001
+     CustomerFacingImpactCount: 12
+     CurrentStatus: Mitigating
+     BusinessImpactSummary: Enterprise VPN customers degraded
+     ETR: 45 minutes
+     RootCauseSummary: Physical fibre cut on LINK-SYD-MEL-FIBRE-01
+     TelemetrySummary: Link down, backup path active
+     ActionSummary: Rerouting via backup path
+     RunbookReference: fibre_cut_runbook.md
+     VenueName: Sydney DC1
+     VenueImpactDescription: Backup link active, no customer impact
+     SLAStatus: At risk
      ```
 2. Confirm in App Insights that the message-activity email path fired, `parse_incident_email()` matched on the body's first line, and `broadcast_incident_update()` was invoked directly (look for a `dependencies` row showing a Graph `sendMail` call, not an IQ-tool `execute_tool` call).
-3. Verify delivery the same way as step 5 above (recipient inbox + agentic mailbox Sent Items).
+3. Verify delivery the same way as step 5 above (recipient inbox + agentic mailbox Sent Items) -- each persona email should show real values, with no literal `{Placeholder}` text remaining.
 4. **Negative check**: send an email whose body does NOT start with the tag (e.g. `"Question about last night's outage"`) and confirm it falls through to the normal conversational reply instead of broadcasting — proves the two code paths don't collide.
 5. Run the offline unit self-check any time without a live tenant: `python agent/test_parse_incident_email.py` (9 assertions covering subject-based and body-first-line tag matching, HTML stripping, case-sensitivity, and the untagged fallthrough).
 

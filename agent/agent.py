@@ -562,6 +562,7 @@ class NocAgent(AgentInterface):
         auth: Authorization,
         auth_handler_name: Optional[str],
         context: TurnContext,
+        sender_email: Optional[str] = None,
     ) -> Optional[str]:
         """Detect a "[INCIDENT:<stage>]"-tagged email delivered as a plain
         "message" activity (channel_id "agents:email") rather than an
@@ -570,11 +571,20 @@ class NocAgent(AgentInterface):
         `on_message`, which has no NOC-specific knowledge and calls this
         hook first). Returns the broadcast summary if the tag matched, else
         None so the caller falls back to normal conversational handling.
+
+        `sender_email`, if given, is CC'd on every persona email sent --
+        so whoever emailed the incident report in gets visibility into the
+        stakeholder broadcast without being added as a primary NOTIFY_*
+        recipient (which stays the configured stakeholder distribution
+        list, not the ad-hoc sender).
         """
         incident_context = parse_incident_email(subject, body)
         if incident_context is None:
             return None
-        results = await self.broadcast_incident_update(incident_context, auth, auth_handler_name, context)
+        cc_recipients = [sender_email] if sender_email else None
+        results = await self.broadcast_incident_update(
+            incident_context, auth, auth_handler_name, context, cc_recipients=cc_recipients
+        )
         return f"Incident notification broadcast: {results}"
 
     async def broadcast_incident_update(
@@ -584,6 +594,7 @@ class NocAgent(AgentInterface):
         auth_handler_name: Optional[str],
         context: TurnContext,
         personas: Optional[list] = None,
+        cc_recipients: Optional[list] = None,
     ) -> dict:
         """Send an incident-lifecycle update to one or more stakeholder personas.
 
@@ -600,7 +611,7 @@ class NocAgent(AgentInterface):
         if not graph_token:
             logger.error("❌ No Graph OBO token -- cannot send outbound notifications this turn")
             return {}
-        return await broadcast(incident_context, graph_token, personas)
+        return await broadcast(incident_context, graph_token, personas, cc_recipients=cc_recipients)
 
     # -------------------------------------------------------------------
     # OBO TOKEN EXCHANGE (Fabric Data Agent + Work IQ require user delegation)
