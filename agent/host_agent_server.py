@@ -12,6 +12,7 @@ around whatever AgentInterface implementation it is given (here, NocAgent).
 import asyncio
 import logging
 import os
+import re
 import socket
 from os import environ
 
@@ -68,6 +69,47 @@ observability_logger.setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+
+def _extract_email_subject(channel_data) -> str:
+    """Best-effort extraction of the email subject from an activity's
+    ``channel_data``, whose shape is connector-defined and untyped in the
+    SDK (``Activity.channel_data: object``). Tries the common key casings
+    a Bot Framework email-channel/Graph-based connector might use.
+    """
+    if channel_data is None:
+        return ""
+    if isinstance(channel_data, dict):
+        for key in ("subject", "Subject", "emailSubject", "email_subject"):
+            value = channel_data.get(key)
+            if value:
+                return str(value)
+        email_obj = channel_data.get("email")
+        if isinstance(email_obj, dict):
+            return str(email_obj.get("subject") or email_obj.get("Subject") or "")
+        return ""
+    for key in ("subject", "Subject", "emailSubject", "email_subject"):
+        value = getattr(channel_data, key, None)
+        if value:
+            return str(value)
+    return ""
+
+
+_SUBJECT_TAG_RE = re.compile(r"\[INCIDENT:\w+\]")
+
+
+def _extract_email_subject_from_text(text: str) -> str:
+    """Fallback: some connectors prepend the subject line onto the message
+    text/body instead of (or in addition to) populating ``channel_data``.
+    If a "[INCIDENT:<stage>]" tag appears anywhere in the first line(s),
+    return that line as the "subject" so parse_incident_email() can match it.
+    """
+    if not text:
+        return ""
+    for line in text.splitlines()[:5]:
+        if _SUBJECT_TAG_RE.search(line):
+            return line
+    return ""
 agents_sdk_config = load_configuration_from_env(environ)
 
 
@@ -242,11 +284,26 @@ class GenericAgentHost:
                     # docs/OUTBOUND_NOTIFICATIONS.md.
                     if is_email and hasattr(self.agent_instance, "handle_email_message"):
                         channel_data = getattr(context.activity, "channel_data", None) or {}
-                        subject = (
-                            channel_data.get("subject", "")
-                            if isinstance(channel_data, dict)
-                            else getattr(channel_data, "subject", "")
-                        ) or ""
+                        subject = _extract_email_subject(channel_data)
+                        # TEMP DIAGNOSTIC (remove once the real channel_data
+                        # shape for this connector is confirmed): logged at
+                        # error level so it is exported to App Insights
+                        # traces/exceptions, since info-level logs are not.
+                        logger.error(
+                            "EMAIL_DIAG channel_data_type=%s channel_data=%r "
+                            "extracted_subject=%r name=%r value=%r text_head=%r",
+                            type(channel_data).__name__,
+                            channel_data,
+                            subject,
+                            getattr(context.activity, "name", None),
+                            getattr(context.activity, "value", None),
+                            (user_message or "")[:200],
+                        )
+                        if not subject:
+                            # Fall back to scanning the message text itself --
+                            # some connectors prepend the subject line to the
+                            # body instead of (or as well as) channel_data.
+                            subject = _extract_email_subject_from_text(user_message)
                         email_response = await self.agent_instance.handle_email_message(
                             subject, user_message, self.agent_app.auth, self.auth_handler_name, context
                         )
