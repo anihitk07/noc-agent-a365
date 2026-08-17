@@ -22,6 +22,7 @@ once this graduates past PoC (the data already exists in Fabric IQ).
 
 import logging
 import os
+import re
 import string
 from pathlib import Path
 from typing import Optional
@@ -87,14 +88,22 @@ def _extract_persona_section(persona: str) -> tuple[str, str]:
     text = TEMPLATE_PATH.read_text(encoding="utf-8")
     marker = f"### Persona: {persona}\n"
     start = text.index(marker) + len(marker)
-    end = text.find("\n### ", start)
-    section = text[start : end if end != -1 else None]
+    # Stop at ANY next markdown heading (# / ## / ###), not just another
+    # "### Persona:" section -- the last persona (partners) is followed by
+    # a "## Variable Reference" (level-2) section, which "\n### " alone
+    # never matched, so the whole trailing reference table was previously
+    # swallowed into the partners persona's rendered email body.
+    end = next((m.start() for m in re.finditer(r"\n#{1,3} ", text[start:])), None)
+    section = text[start : start + end if end is not None else None]
 
     subject_line = next(line for line in section.splitlines() if line.startswith("**Subject**:"))
     subject = subject_line.split("**Subject**:", 1)[1].strip()
 
     body_marker = "**Body**:\n\n"
-    body = section[section.index(body_marker) + len(body_marker):].strip()
+    body = section[section.index(body_marker) + len(body_marker):]
+    # Also drop a trailing "---" markdown horizontal rule (used to visually
+    # separate the last persona section from "## Variable Reference" below).
+    body = re.sub(r"\n-{3,}\s*$", "", body).strip()
     return subject, body
 
 
@@ -180,6 +189,12 @@ def _demo() -> None:
         subject, body = render_persona_message(persona, sample_context)
         assert subject and body, f"{persona}: empty render"
         assert "{" not in subject, f"{persona}: unrendered placeholder in subject: {subject}"
+        assert "{" not in body, f"{persona}: unrendered placeholder in body: {body}"
+        # Regression guard: partners is the LAST "### Persona:" section in the
+        # template, followed by "## Variable Reference" -- a prior bug in
+        # _extract_persona_section() only stopped at another "### " heading,
+        # so the whole trailing reference table leaked into the partners body.
+        assert "Variable Reference" not in body, f"{persona}: leaked trailing template content"
         # Fields NOT in this persona's allow-list must never leak into its email.
         leaked = [f for f in sample_context if f not in PERSONAS[persona]["allowed_fields"] and f in body]
         assert not leaked, f"{persona}: leaked restricted fields {leaked}"
