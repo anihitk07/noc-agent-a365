@@ -220,6 +220,8 @@ class GenericAgentHost:
                     # notifications.py / docs/OUTBOUND_NOTIFICATIONS.md.
                     # Stored keyed by context.activity.conversation.id.
                     await self.agent_app.proactive.store_conversation(context)
+                    conversation_id = context.activity.conversation.id
+                    logger.info("💾 Stored conversation for proactive notify: %s", conversation_id)
 
                     logger.info(f"📨 {user_message}")
 

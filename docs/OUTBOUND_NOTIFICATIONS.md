@@ -122,6 +122,87 @@ repo's answer is deliberately minimal (see `agent/notifications.py`):
   template, so (e.g.) the `partners` audience structurally cannot see
   internal root-cause telemetry even if `incident_context` includes it.
 
+## End-to-end test procedure
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Op as Tester
+    participant Teams as Teams client
+    participant Bot as Azure Bot Service
+    participant App as App Service (NocAgent)
+    participant Log as App Insights / logs
+    participant Graph as Microsoft Graph
+
+    Note over Op,Graph: Phase 1 -- seed a resumable conversation (one-time per app lifetime/restart)
+    Op->>Teams: Message the NOC agent ("status check")
+    Teams->>Bot: Activity
+    Bot->>App: POST /api/messages
+    App->>App: on_message() -> proactive.store_conversation(context)
+    App->>Log: log line "💾 Stored conversation for proactive notify: <conversation_id>"
+    App-->>Teams: normal agent reply (turn completes as usual)
+    Op->>Log: Read conversation_id from logs (App Insights traces, or console if running locally)
+
+    Note over Op,Graph: Phase 2 -- trigger the outbound broadcast (no Teams message involved)
+    Op->>App: POST /api/incidents/notify {conversation_id, incident_context, personas}
+    App->>App: proactive.continue_conversation(adapter, conversation_id, handler)
+    App->>App: handler() -> agent.broadcast_incident_update()
+    App->>App: _exchange_user_token(scope=graph.microsoft.com/.default)  (delegated Mail.Send OBO)
+    App->>Graph: POST /me/sendMail  (once per requested persona)
+    Graph-->>App: 202 Accepted (or 4xx/5xx)
+    App-->>Op: {"results": {"executives": true, "technical": true, ...}}
+
+    Note over Op,Graph: Phase 3 -- verify delivery
+    Op->>Graph: Check each persona's recipient inbox + the agentic mailbox's Sent Items
+```
+
+### Prerequisites (do once, before any test run)
+
+1. Deploy the base repo per `docs/DEPLOYMENT.md` (App Service running, `AUTH_HANDLER_NAME` set, `a365 setup all` completed).
+2. Grant the **`Mail.Send`** consent from `docs/DEPLOYMENT.md` step 6b (in addition to step 6a's `Mail.Read`).
+3. Set at least one `NOTIFY_<PERSONA>_EMAILS` env var (e.g. `NOTIFY_TECHNICAL_EMAILS=you@yourtenant.com`) on the App Service and restart it -- personas with no recipients are silently skipped (by design, not a bug).
+4. Confirm the agentic identity's mailbox (`nocagent@<tenant>`) is licensed for Exchange Online (a Copilot/M365 license alone does not guarantee a mailbox -- `Mail.Send` will 403 without one).
+
+### Step-by-step
+
+1. **Seed a conversation.** In Teams, message the agent once (any text, e.g. `"status check"`). Confirm a normal reply comes back -- this proves the turn completed and `store_conversation` ran.
+2. **Retrieve the `conversation_id`.** Search App Insights `traces` (or stdout if running via `azd deploy`/local `python host_agent_server.py`) for `"Stored conversation for proactive notify:"` and copy the ID that follows.
+3. **Call the webhook** (from your own machine, `az rest`/`curl`/Postman -- must pass whatever JWT `/api/messages` already requires, since it shares middleware):
+   ```bash
+   curl -X POST https://<app-name>.azurewebsites.net/api/incidents/notify \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer <token>" \
+     -d '{
+       "conversation_id": "<id from step 2>",
+       "personas": ["technical"],
+       "incident_context": {
+         "LifecycleStage": "escalation",
+         "ServiceName": "Sydney-Melbourne Fibre",
+         "IncidentId": "INC-TEST-001",
+         "RootCauseSummary": "Test run -- physical fibre cut simulated",
+         "TelemetrySummary": "n/a (test)",
+         "ActionSummary": "Rerouting via backup path",
+         "RunbookReference": "fibre_cut_runbook.md"
+       }
+     }'
+   ```
+4. **Check the response.** Expect `200 {"results": {"technical": true}}`. A `false` for a persona means either no recipients configured (check step 3 of Prerequisites) or a Graph error (check App Insights for the `"❌ Graph sendMail failed"` log line and its status code/body).
+5. **Verify delivery.** Check the `NOTIFY_TECHNICAL_EMAILS` recipient's inbox for the email, and the agentic mailbox's **Sent Items** (since `saveToSentItems: true`).
+6. **Repeat for the other 3 personas** (`executives`, `venue`, `partners`), and once with `"personas"` omitted entirely to confirm all 4 fire in one call.
+7. **Negative-path checks** (confirm these fail cleanly, not silently):
+   - Omit `conversation_id` -> expect `400`.
+   - Use a `conversation_id` from before the app last restarted -> expect `404` (proves the in-memory-storage limitation above is real, not theoretical).
+   - Revoke/skip the `Mail.Send` consent grant and re-test -> expect a Graph `403`/`invalid_grant` surfaced in the `results` as `false`, with detail in the logs (not a silent success).
+
+### What "working end to end" means here
+
+All four personas return `true` in Step 6, each recipient receives an email
+matching their persona's template/field-restriction (§4 above), and the
+`conversation_id`-expiry and consent-revocation negative paths in Step 7
+fail the way this doc says they should. If any of that diverges, it's a
+real bug in this reference implementation, not a documentation gap --
+file it against `agent/notifications.py` or `host_agent_server.py`.
+
 ## Limitations (PoC-honest, read before Accenture builds further)
 
 - **In-memory conversation storage.** `ProactiveOptions(storage=self.storage)`
