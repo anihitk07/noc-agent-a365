@@ -232,6 +232,28 @@ class GenericAgentHost:
                     channel_id = getattr(context.activity, "channel_id", "") or ""
                     is_email = "email" in channel_id.lower()
 
+                    # A directly-composed/forwarded email to the agent's
+                    # mailbox arrives here as a plain "message" activity (not
+                    # an AgentNotificationActivity), with its subject in
+                    # channel_data rather than a top-level field. Give the
+                    # agent a chance to detect an incident-lifecycle tag
+                    # (e.g. "[INCIDENT:ESCALATION]") before falling back to
+                    # normal conversational handling -- see
+                    # docs/OUTBOUND_NOTIFICATIONS.md.
+                    if is_email and hasattr(self.agent_instance, "handle_email_message"):
+                        channel_data = getattr(context.activity, "channel_data", None) or {}
+                        subject = (
+                            channel_data.get("subject", "")
+                            if isinstance(channel_data, dict)
+                            else getattr(channel_data, "subject", "")
+                        ) or ""
+                        email_response = await self.agent_instance.handle_email_message(
+                            subject, user_message, self.agent_app.auth, self.auth_handler_name, context
+                        )
+                        if email_response is not None:
+                            await context.send_activity(email_response)
+                            return
+
                     typing_task = None
                     if not is_email:
                         await context.send_activity(Activity(type="typing"))

@@ -532,6 +532,28 @@ class NocAgent(AgentInterface):
     # OUTBOUND MULTI-PERSONA EMAIL (proactive, not turn-initiated)
     # -------------------------------------------------------------------
 
+    async def handle_email_message(
+        self,
+        subject: str,
+        body: str,
+        auth: Authorization,
+        auth_handler_name: Optional[str],
+        context: TurnContext,
+    ) -> Optional[str]:
+        """Detect a "[INCIDENT:<stage>]"-tagged email delivered as a plain
+        "message" activity (channel_id "agents:email") rather than an
+        `AgentNotificationActivity` -- a directly-composed/forwarded email
+        to the agent's mailbox arrives this way (see host_agent_server.py's
+        `on_message`, which has no NOC-specific knowledge and calls this
+        hook first). Returns the broadcast summary if the tag matched, else
+        None so the caller falls back to normal conversational handling.
+        """
+        incident_context = parse_incident_email(subject, body)
+        if incident_context is None:
+            return None
+        results = await self.broadcast_incident_update(incident_context, auth, auth_handler_name, context)
+        return f"Incident notification broadcast: {results}"
+
     async def broadcast_incident_update(
         self,
         incident_context: dict,
