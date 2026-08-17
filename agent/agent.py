@@ -58,6 +58,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from typing import Optional
 
 from agent_framework import Agent, MCPStreamableHTTPTool, Message
@@ -226,6 +227,28 @@ def _extract_a2a_consent_url(exc: BaseException) -> Optional[str]:
             if isinstance(consent_url, str):
                 return consent_url
     return None
+
+
+def parse_incident_email(subject: str, body: str) -> Optional[dict]:
+    """Detect and parse a "[INCIDENT:<stage>]"-tagged notification email.
+
+    Returns the `incident_context` dict for `broadcast_incident_update()` if
+    `subject` carries the tag, else None (meaning: handle as a normal
+    conversational email per the existing EMAIL_NOTIFICATION path).
+
+    Body convention is one `Field: value` pair per line (HTML tags stripped
+    first) -- deliberately simple, no YAML/JSON parser dependency.
+    """
+    match = re.match(r"\s*\[INCIDENT:(\w+)\]", subject or "")
+    if not match:
+        return None
+    context: dict = {"LifecycleStage": match.group(1)}
+    for line in re.sub("<[^>]+>", "", body or "").splitlines():
+        if ":" in line:
+            key, _, value = line.partition(":")
+            if key.strip():
+                context[key.strip()] = value.strip()
+    return context
 
 
 # =============================================================================
@@ -470,7 +493,22 @@ class NocAgent(AgentInterface):
 
             if notification_type == NotificationTypes.EMAIL_NOTIFICATION:
                 email = notification_activity.email
+                email_subject = getattr(email, "subject", "") or ""
                 email_body = getattr(email, "html_body", "") or getattr(email, "body", "")
+
+                # Event-driven incident-lifecycle trigger: an incident-management
+                # system emails the monitored inbox with a "[INCIDENT:<stage>]"
+                # subject tag instead of a Teams/webhook call needing a stored
+                # conversation_id -- inspired by the OnNewEmailV3 connector
+                # trigger pattern in Azure-Samples/m365-inbox-serverless-agent-python
+                # (this repo's own EMAIL_NOTIFICATION handler is the equivalent
+                # building block: already event-driven on new mail, no prior
+                # conversation needed). See docs/OUTBOUND_NOTIFICATIONS.md.
+                incident_context = parse_incident_email(email_subject, email_body)
+                if incident_context is not None:
+                    results = await self.broadcast_incident_update(incident_context, auth, auth_handler_name, context)
+                    return f"Incident notification broadcast: {results}"
+
                 message = (
                     "You received the following email about a network incident. "
                     "Please review and summarize the blast radius and next steps.\n\n"

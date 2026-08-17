@@ -169,13 +169,21 @@ accumulate garbage versions in a long-lived deployment — see
 
 The 4-IQ Toolbox above is read-only and turn-initiated (a user asks, the
 agent answers). A separate, additive capability — `agent/notifications.py`
-+ `POST /api/incidents/notify` — lets an external event (not a Teams
-message) trigger the agent to *originate* a multi-persona email broadcast,
-using the Agents SDK's own proactive-conversation feature
-(`AgentApplication.proactive.continue_conversation`) plus a direct Graph
-`sendMail` OBO call (bypassing the Toolbox, since Work IQ's connection is
-read-only). See [`docs/OUTBOUND_NOTIFICATIONS.md`](OUTBOUND_NOTIFICATIONS.md)
-for the full design, permission model, and current limitations.
+— lets an external event (not a Teams message) trigger the agent to
+*originate* a multi-persona email broadcast, via **two independent
+triggers** that both call the same `broadcast_incident_update()` fan-out:
+
+1. `POST /api/incidents/notify` — a webhook that resumes a previously
+   stored Teams conversation via the Agents SDK's own proactive-conversation
+   feature (`AgentApplication.proactive.continue_conversation`).
+2. An `[INCIDENT:<stage>]`-tagged email sent to the agentic mailbox — routed
+   through the existing (already event-driven) `EMAIL_NOTIFICATION` handler,
+   with no dependency on any prior Teams conversation or stored state.
+
+Both paths make a direct Graph `sendMail` OBO call (bypassing the Toolbox,
+since Work IQ's connection is read-only). See
+[`docs/OUTBOUND_NOTIFICATIONS.md`](OUTBOUND_NOTIFICATIONS.md) for the full
+design, permission model, trigger comparison, and current limitations.
 
 ## Infrastructure (`infra/`)
 

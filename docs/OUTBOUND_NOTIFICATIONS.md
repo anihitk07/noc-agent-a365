@@ -9,7 +9,7 @@
 
 | Question | Answer |
 |---|---|
-| Existing A365 sample for agent-initiated multi-recipient email? | **No.** Neither `Agent365-Samples` nor `agent365-skills` demonstrate this. The closest Microsoft accelerator ("Work IQ" email trigger in `microsoft-iq-solution-accelerator`) is a **different product** — a Power Automate/Copilot Studio inbound trigger, not an A365/MAF outbound pattern. This repo's `notifications.py` is a from-scratch reference implementation. |
+| Existing A365 sample for agent-initiated multi-recipient email? | **No A365-native sample**, but `Azure-Samples/m365-inbox-serverless-agent-python` (different hosting stack) demonstrates the validating building block for the *trigger* half — see §5. This repo's `notifications.py` is a from-scratch reference implementation. |
 | Supported permission/auth model for outbound send? | Delegated `Mail.Send` on the same agentic user identity, granted via the **same `oauth2PermissionGrants` mechanism** already used for `Mail.Read` (docs/DEPLOYMENT.md step 6a/6b) — **no new app registration needed.** |
 | Templating/persona routing guidance at the A365 layer? | **None — it's entirely application-side**, same as this repo's implementation. A365 has no persona/templating primitive of its own. |
 
@@ -28,7 +28,11 @@ No. Two things were checked and ruled out:
   multi-persona — architecturally unrelated to this repo's Teams → Bot
   Service → App Service → MAF flow. It is **not** a template to copy from.
 
-`agent/notifications.py` was written from scratch for this gap.
+`agent/notifications.py` was written from scratch for this gap. However,
+see §5 below: `Azure-Samples/m365-inbox-serverless-agent-python` (a
+*different* Microsoft sample, not A365) validates the **trigger** half of
+this pattern and led to a second, more robust trigger being added to this
+repo.
 
 ## 2. Can the existing Teams → Bot Channel → App Service flow originate a proactive send?
 
@@ -122,6 +126,67 @@ repo's answer is deliberately minimal (see `agent/notifications.py`):
   template, so (e.g.) the `partners` audience structurally cannot see
   internal root-cause telemetry even if `incident_context` includes it.
 
+## 5. A second, more robust trigger: `[INCIDENT:<stage>]`-tagged inbound email
+
+The `/api/incidents/notify` webhook (§2) has a real limitation: it needs a
+`conversation_id` obtained from a **prior Teams turn**, and that ID lives in
+the app's in-memory `MemoryStorage` — it's lost on every app restart. That's
+fine for a live demo where a Teams conversation is always started first, but
+it's not a credible "incident lifecycle event fires a notification with zero
+human involvement" story.
+
+`Azure-Samples/m365-inbox-serverless-agent-python` (a **different** Microsoft
+sample — Azure Functions "serverless agents runtime", not A365/MAF) shows the
+Microsoft-sanctioned shape for that: an `OnNewEmailV3` connector trigger that
+fires automatically whenever new mail lands in a monitored inbox, with **no
+dependency on any prior conversation**.
+
+This repo already has the equivalent building block natively, via A365's own
+notification channel: `host_agent_server.py`/`agent.py`'s
+`EMAIL_NOTIFICATION` handler already fires whenever mail arrives at the
+monitored agentic mailbox — it just previously only fed a conversational
+reply. `agent.py` now also recognizes a **subject-line convention**:
+
+```
+Subject: [INCIDENT:ESCALATION] Sydney fibre cut — SEV1
+Body:
+Site: SYD-CORE-04
+Severity: SEV1
+ETA: 45 minutes
+```
+
+- The tag is `[INCIDENT:<STAGE>]` (case-sensitive, upper-case stage by
+  convention — e.g. `DETECTION`, `ESCALATION`, `MITIGATION`, `RESOLUTION`)
+  at the start of the subject.
+- Each body line of the form `Field: value` becomes an entry in the
+  `incident_context` dict (HTML tags are stripped first), alongside the
+  extracted `LifecycleStage`.
+- Parsing lives in the standalone, unit-testable `parse_incident_email()`
+  function in `agent.py` (self-check: `python agent/test_parse_incident_email.py`,
+  covers tagged/untagged subjects, HTML stripping, case-sensitivity, and
+  whitespace tolerance — 5 assertions, all passing).
+- If the subject matches, `handle_agent_notification_activity` calls
+  `broadcast_incident_update()` **directly** — the same fan-out used by the
+  webhook — and skips the conversational reply entirely. If it doesn't
+  match, the original inbound-email conversational behavior is unchanged.
+
+**Trade-off vs. the webhook:** this path needs an external incident system
+that can send a correctly-tagged email to the monitored inbox (no new auth,
+reuses the existing A365 notification channel already wired for inbound
+mail) but is otherwise more robust — it survives app restarts and needs no
+prior Teams conversation. The webhook path remains useful when the trigger
+source can call an authenticated HTTP endpoint directly instead of sending
+email. Both call the same `broadcast_incident_update()` → `notifications.py`
+fan-out, so persona templating/field-restriction behavior is identical
+either way.
+
+**Revised answer to Q1**: there is still no A365-native sample for
+*outbound* multi-recipient send, but this repo now also demonstrates —
+inspired by, and crediting, `Azure-Samples/m365-inbox-serverless-agent-python`
+— a real, tested pattern for the *inbound trigger* half of a
+conversation-independent incident-notification flow, built entirely on
+primitives this repo already had (the A365 `EMAIL_NOTIFICATION` channel).
+
 ## End-to-end test procedure
 
 ```mermaid
@@ -194,6 +259,18 @@ sequenceDiagram
    - Use a `conversation_id` from before the app last restarted -> expect `404` (proves the in-memory-storage limitation above is real, not theoretical).
    - Revoke/skip the `Mail.Send` consent grant and re-test -> expect a Graph `403`/`invalid_grant` surfaced in the `results` as `false`, with detail in the logs (not a silent success).
 
+### Path B: test the `[INCIDENT:<stage>]` email trigger (§5) instead of the webhook
+
+This skips steps 1-2 above entirely (no Teams conversation/`conversation_id` needed):
+
+1. Send an email to the agentic identity's monitored inbox (`nocagent@<tenant>`, the same address Work IQ's `Mail.Read` already watches) with:
+   - **Subject**: `[INCIDENT:ESCALATION] Sydney fibre cut test`
+   - **Body**: one `Field: value` pair per line, e.g. `Site: SYD-CORE-04`, `Severity: SEV1`, `ETA: 45 minutes`.
+2. Confirm in App Insights that `EMAIL_NOTIFICATION` fired, `parse_incident_email()` matched, and `broadcast_incident_update()` was invoked directly (log line: `"Incident notification broadcast: ..."`).
+3. Verify delivery the same way as step 5 above (recipient inbox + agentic mailbox Sent Items).
+4. **Negative check**: send an email with an untagged subject (e.g. `"Question about last night's outage"`) and confirm it falls through to the normal conversational reply instead of broadcasting — proves the two code paths don't collide.
+5. Run the offline unit self-check any time without a live tenant: `python agent/test_parse_incident_email.py` (5 assertions covering tag matching, HTML stripping, case-sensitivity, and the untagged fallthrough).
+
 ### What "working end to end" means here
 
 All four personas return `true` in Step 6, each recipient receives an email
@@ -209,7 +286,9 @@ file it against `agent/notifications.py` or `host_agent_server.py`.
   reuses the same `MemoryStorage()` as the rest of this PoC — every stored
   conversation reference (and therefore every valid `conversation_id`) is
   lost on app restart/redeploy. Swap in durable `Storage` (Cosmos/Blob-backed)
-  before this is anything but a demo.
+  before this is anything but a demo. **Note**: this limitation is specific
+  to the `/api/incidents/notify` webhook path — the `[INCIDENT:<stage>]`
+  email trigger (§5) does not depend on stored conversation state at all.
 - **No stakeholder directory.** Recipients are static env vars, not sourced
   from Fabric IQ's Service/Stakeholder ontology entities (which already
   model this data) — see the `ponytail:` comment in `notifications.py`.
