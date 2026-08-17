@@ -3,7 +3,11 @@
 > Answers the Accenture review questions on agent-initiated outbound email.
 > Code: `agent/notifications.py`, `agent.py`'s `broadcast_incident_update()`,
 > `host_agent_server.py`'s `POST /api/incidents/notify`. Templates:
-> `data/runbooks/customer_communication_template.md` §"Persona Templates".
+> `agent/data/runbooks/customer_communication_template.md` §"Persona
+> Templates" (a deploy-time copy of the canonical
+> `data/runbooks/customer_communication_template.md` -- `azure.yaml` only
+> packages the `agent/` directory, so anything read from disk at runtime
+> must live inside it; keep both files in sync if the template changes).
 
 ## TL;DR
 

@@ -31,7 +31,15 @@ import httpx
 logger = logging.getLogger(__name__)
 
 GRAPH_SEND_MAIL_URL = "https://graph.microsoft.com/v1.0/me/sendMail"
-TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "data" / "runbooks" / "customer_communication_template.md"
+# NOTE: deliberately reads from agent/data/runbooks/ (a copy), NOT the
+# canonical repo-root data/runbooks/ used by scripts/create_foundry_iq_kb.py
+# for Foundry IQ ingestion. azure.yaml deploys only the `agent/` directory
+# (`project: agent`) as the App Service package, so anything read from disk
+# at RUNTIME must live under agent/ or it 404s in production -- confirmed by
+# a live "[Errno 2] No such file or directory" failure the first time this
+# code path actually executed post-deploy. Keep both copies in sync if the
+# template changes; see docs/OUTBOUND_NOTIFICATIONS.md.
+TEMPLATE_PATH = Path(__file__).resolve().parent / "data" / "runbooks" / "customer_communication_template.md"
 
 # One persona = one audience = one recipient list + one template section
 # heading (matched literally against "### Persona: <name>" in the template
