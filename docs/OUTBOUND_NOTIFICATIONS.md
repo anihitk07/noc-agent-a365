@@ -145,11 +145,15 @@ This repo already has the equivalent building block natively, via A365's own
 notification channel: `host_agent_server.py`/`agent.py`'s
 `EMAIL_NOTIFICATION` handler already fires whenever mail arrives at the
 monitored agentic mailbox — it just previously only fed a conversational
-reply. `agent.py` now also recognizes a **subject-line convention**:
+reply. `agent.py` now also recognizes a **body-first-line convention**
+(**not** the email Subject — live testing showed the A365 email connector's
+plain "message" activity delivery does not transmit the Subject line at all;
+`channel_data` only carries `{"tenant": {...}, "productContext": "email"}`):
 
 ```
-Subject: [INCIDENT:ESCALATION] Sydney fibre cut — SEV1
+Subject: (anything — not read)
 Body:
+[INCIDENT:ESCALATION]
 Site: SYD-CORE-04
 Severity: SEV1
 ETA: 45 minutes
@@ -157,10 +161,14 @@ ETA: 45 minutes
 
 - The tag is `[INCIDENT:<STAGE>]` (case-sensitive, upper-case stage by
   convention — e.g. `DETECTION`, `ESCALATION`, `MITIGATION`, `RESOLUTION`)
-  at the start of the subject.
-- Each body line of the form `Field: value` becomes an entry in the
-  `incident_context` dict (HTML tags are stripped first), alongside the
+  and must be the **first non-blank line of the email body**.
+- Each subsequent body line of the form `Field: value` becomes an entry in
+  the `incident_context` dict (HTML tags are stripped first), alongside the
   extracted `LifecycleStage`.
+- `parse_incident_email(subject, body)` also still checks `subject` first
+  (for forward-compatibility with any future delivery shape that does carry
+  one), but on the live "message"-activity email path `subject` is always
+  empty, so the body-first-line check is what actually fires in practice.
 - Parsing lives in the standalone, unit-testable `parse_incident_email()`
   function in `agent.py` (self-check: `python agent/test_parse_incident_email.py`,
   covers tagged/untagged subjects, HTML stripping, case-sensitivity, and
@@ -264,12 +272,18 @@ sequenceDiagram
 This skips steps 1-2 above entirely (no Teams conversation/`conversation_id` needed):
 
 1. Send an email to the agentic identity's monitored inbox (`nocagent@<tenant>`, the same address Work IQ's `Mail.Read` already watches) with:
-   - **Subject**: `[INCIDENT:ESCALATION] Sydney fibre cut test`
-   - **Body**: one `Field: value` pair per line, e.g. `Site: SYD-CORE-04`, `Severity: SEV1`, `ETA: 45 minutes`.
-2. Confirm in App Insights that `EMAIL_NOTIFICATION` fired, `parse_incident_email()` matched, and `broadcast_incident_update()` was invoked directly (log line: `"Incident notification broadcast: ..."`).
+   - **Subject**: anything (e.g. `Sydney fibre cut test`) — it is not read on this path.
+   - **Body**: the tag as the **first line**, then one `Field: value` pair per line, e.g.:
+     ```
+     [INCIDENT:ESCALATION]
+     Site: SYD-CORE-04
+     Severity: SEV1
+     ETA: 45 minutes
+     ```
+2. Confirm in App Insights that the message-activity email path fired, `parse_incident_email()` matched on the body's first line, and `broadcast_incident_update()` was invoked directly (look for a `dependencies` row showing a Graph `sendMail` call, not an IQ-tool `execute_tool` call).
 3. Verify delivery the same way as step 5 above (recipient inbox + agentic mailbox Sent Items).
-4. **Negative check**: send an email with an untagged subject (e.g. `"Question about last night's outage"`) and confirm it falls through to the normal conversational reply instead of broadcasting — proves the two code paths don't collide.
-5. Run the offline unit self-check any time without a live tenant: `python agent/test_parse_incident_email.py` (5 assertions covering tag matching, HTML stripping, case-sensitivity, and the untagged fallthrough).
+4. **Negative check**: send an email whose body does NOT start with the tag (e.g. `"Question about last night's outage"`) and confirm it falls through to the normal conversational reply instead of broadcasting — proves the two code paths don't collide.
+5. Run the offline unit self-check any time without a live tenant: `python agent/test_parse_incident_email.py` (9 assertions covering subject-based and body-first-line tag matching, HTML stripping, case-sensitivity, and the untagged fallthrough).
 
 ### What "working end to end" means here
 

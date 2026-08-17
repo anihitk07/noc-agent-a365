@@ -44,7 +44,33 @@ def main():
     padded = parse_incident_email("   [INCIDENT:MITIGATION] update", "Owner: NOC-Team")
     _check("leading whitespace before tag tolerated", padded is not None and padded["LifecycleStage"] == "MITIGATION")
 
-    print("PASS: test_parse_incident_email.py self-check passed (5 cases)")
+    # Body-first-line tag (no subject available at all) -- the PRIMARY
+    # real-world convention: live testing showed the A365 email connector's
+    # "message" activity delivers no subject, only channel_data =
+    # {"tenant": {...}, "productContext": "email"}. See docs/OUTBOUND_NOTIFICATIONS.md.
+    body_tagged = parse_incident_email(
+        "",
+        "[INCIDENT:ESCALATION]\nSite: SYD-CORE-04\nSeverity: SEV1\nETA: 45 minutes",
+    )
+    _check("body-first-line tag is parsed (no subject)", body_tagged is not None)
+    _check("body-tag lifecycle stage extracted", body_tagged["LifecycleStage"] == "ESCALATION")
+    _check("body-tag Site field parsed", body_tagged["Site"] == "SYD-CORE-04")
+
+    # Blank lines before the body tag are tolerated.
+    body_tagged_padded = parse_incident_email(
+        "",
+        "\n\n[INCIDENT:MITIGATION]\nOwner: NOC-Team",
+    )
+    _check(
+        "blank lines before body tag tolerated",
+        body_tagged_padded is not None and body_tagged_padded["LifecycleStage"] == "MITIGATION",
+    )
+
+    # Untagged body and no subject -> None.
+    untagged_body = parse_incident_email("", "Just a regular question, no tag here.")
+    _check("untagged body with no subject returns None", untagged_body is None)
+
+    print("PASS: test_parse_incident_email.py self-check passed (9 cases)")
 
 
 if __name__ == "__main__":

@@ -233,17 +233,40 @@ def parse_incident_email(subject: str, body: str) -> Optional[dict]:
     """Detect and parse a "[INCIDENT:<stage>]"-tagged notification email.
 
     Returns the `incident_context` dict for `broadcast_incident_update()` if
-    `subject` carries the tag, else None (meaning: handle as a normal
-    conversational email per the existing EMAIL_NOTIFICATION path).
+    the tag is present, else None (meaning: handle as a normal conversational
+    email per the existing EMAIL_NOTIFICATION path).
 
-    Body convention is one `Field: value` pair per line (HTML tags stripped
-    first) -- deliberately simple, no YAML/JSON parser dependency.
+    The tag is looked for in TWO places, in order:
+      1. `subject` (kept for forward-compatibility / other delivery shapes
+         that do carry a subject, e.g. a future typed notification entity).
+      2. The first non-blank line of `body`. This is the primary, reliable
+         convention: live testing showed the A365 email connector's plain
+         "message" activity delivers `channel_data` as only
+         `{"tenant": {...}, "productContext": "email"}` -- the email Subject
+         line is NOT transmitted at all on this path. See
+         docs/OUTBOUND_NOTIFICATIONS.md, which documents the tag as the
+         first line of the email BODY for this reason.
+
+    Remaining body convention is one `Field: value` pair per line (HTML tags
+    stripped first) -- deliberately simple, no YAML/JSON parser dependency.
     """
+    clean_body = re.sub("<[^>]+>", "", body or "")
+    lines = clean_body.splitlines()
+
     match = re.match(r"\s*\[INCIDENT:(\w+)\]", subject or "")
+    remaining_lines = lines
+    if not match:
+        for idx, line in enumerate(lines):
+            if line.strip():
+                match = re.match(r"\s*\[INCIDENT:(\w+)\]", line)
+                if match:
+                    remaining_lines = lines[idx + 1 :]
+                break
+
     if not match:
         return None
     context: dict = {"LifecycleStage": match.group(1)}
-    for line in re.sub("<[^>]+>", "", body or "").splitlines():
+    for line in remaining_lines:
         if ":" in line:
             key, _, value = line.partition(":")
             if key.strip():
