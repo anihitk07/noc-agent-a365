@@ -290,6 +290,22 @@ no separate app registration or client-credential grant is required for this
 path. See docs/OUTBOUND_NOTIFICATIONS.md for the full permission-model
 explanation and its limits.
 
+Also set at least one `NOTIFY_<PERSONA>_EMAILS` app setting (personas with
+no recipients are silently skipped, by design) — **the names are all
+singular `PERSONA`**, e.g. `NOTIFY_PARTNER_EMAILS` not
+`NOTIFY_PARTNERS_EMAILS` (a live typo here cost an entire test session
+before it was caught — `az webapp config appsettings list ... | grep -i
+notify` is the fastest way to spot it):
+
+```bash
+az webapp config appsettings set -g "rg-$AZURE_ENV_NAME" -n "<webAppName>" --settings \
+  NOTIFY_EXECUTIVES_EMAILS="you@yourtenant.com" \
+  NOTIFY_TECHNICAL_EMAILS="you@yourtenant.com" \
+  NOTIFY_VENUE_EMAILS="you@yourtenant.com" \
+  NOTIFY_PARTNER_EMAILS="you@yourtenant.com"
+az webapp restart -g "rg-$AZURE_ENV_NAME" -n "<webAppName>"
+```
+
 ## 7. App Service configuration — nothing extra to push
 
 Steps 3-6 only create Foundry **project connections**
@@ -517,6 +533,42 @@ posting synthetic activities to `/api/messages` directly, since those lack a
 valid Bot Framework JWT and a real `serviceUrl` to deliver the reply to.
 **This is the one step in this whole deployment that genuinely cannot be
 automated or delegated — it requires a human driving a real Teams client.**
+
+### 10a. (Optional) Verify the outbound email-trigger notification path
+
+Only relevant if you completed step 6b (`Mail.Send` consent) and set
+`NOTIFY_<PERSONA>_EMAILS`. Send an email to the agentic mailbox
+(`nocagent@<tenant>`) with the tag as the **first line of the body** (not
+the Subject — see `docs/OUTBOUND_NOTIFICATIONS.md` §5 for why), followed by
+one `Field: value` line per field, using the **exact** field names the
+persona templates substitute (case-sensitive — arbitrary names render as
+literal unsubstituted `{Placeholder}` text, this is by design not an error):
+
+```
+[INCIDENT:ESCALATION]
+ServiceName: Sydney-Melbourne Fibre
+ServiceId: VPN-ACME-CORP
+IncidentId: INC-TEST-001
+CustomerFacingImpactCount: 12
+CurrentStatus: Mitigating
+BusinessImpactSummary: Enterprise VPN customers degraded
+ETR: 45 minutes
+RootCauseSummary: Physical fibre cut on LINK-SYD-MEL-FIBRE-01
+TelemetrySummary: Link down, backup path active
+ActionSummary: Rerouting via backup path
+RunbookReference: fibre_cut_runbook.md
+VenueName: Sydney DC1
+VenueImpactDescription: Backup link active, no customer impact
+SLAStatus: At risk
+```
+
+Confirm: (1) each of the 4 `NOTIFY_<PERSONA>_EMAILS` recipients gets an
+email with real values substituted, no `{Placeholder}` text remaining; (2)
+**you (the sender) are Cc'd** on every one of those emails, in addition to
+the brief in-thread reply (`"Incident notification broadcast: {'executives':
+True, ...}"`). See `docs/OUTBOUND_NOTIFICATIONS.md`'s full "Live E2E test
+results" section for the 5 real bugs found doing exactly this test, in case
+any of them recur on a different tenant.
 
 ## 11. Teardown (after E2E passes)
 

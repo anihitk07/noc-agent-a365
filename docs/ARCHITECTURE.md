@@ -181,7 +181,10 @@ triggers** that both call the same `broadcast_incident_update()` fan-out:
    with no dependency on any prior Teams conversation or stored state.
 
 Both paths make a direct Graph `sendMail` OBO call (bypassing the Toolbox,
-since Work IQ's connection is read-only). See
+since Work IQ's connection is read-only). Trigger 2 also CC's the original
+inbound email's sender on every persona email sent, so whoever emailed the
+incident report in sees the broadcast content, not just the static
+`NOTIFY_<PERSONA>_EMAILS` distribution list. See
 [`docs/OUTBOUND_NOTIFICATIONS.md`](OUTBOUND_NOTIFICATIONS.md) for the full
 design, permission model, trigger comparison, and current limitations.
 

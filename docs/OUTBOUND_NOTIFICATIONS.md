@@ -16,6 +16,8 @@
 | Existing A365 sample for agent-initiated multi-recipient email? | **No A365-native sample**, but `Azure-Samples/m365-inbox-serverless-agent-python` (different hosting stack) demonstrates the validating building block for the *trigger* half — see §5. This repo's `notifications.py` is a from-scratch reference implementation. |
 | Supported permission/auth model for outbound send? | Delegated `Mail.Send` on the same agentic user identity, granted via the **same `oauth2PermissionGrants` mechanism** already used for `Mail.Read` (docs/DEPLOYMENT.md step 6a/6b) — **no new app registration needed.** |
 | Templating/persona routing guidance at the A365 layer? | **None — it's entirely application-side**, same as this repo's implementation. A365 has no persona/templating primitive of its own. |
+| Does the original sender see the broadcast, not just the static distribution list? | **Yes.** `handle_email_message()` now CC's the inbound email's sender on every persona email sent (see §6) — confirmed via live test. |
+| Has this actually been tested against a live tenant, end to end? | **Yes — see "Live E2E Test Results" below.** Both trigger paths, all 4 personas, real Graph `sendMail` calls, real inbox verification. 5 real bugs were found and fixed in the process (details below). |
 
 ## 1. Is there a Microsoft sample for this pattern?
 
@@ -176,7 +178,7 @@ ETA: 45 minutes
 - Parsing lives in the standalone, unit-testable `parse_incident_email()`
   function in `agent.py` (self-check: `python agent/test_parse_incident_email.py`,
   covers tagged/untagged subjects, HTML stripping, case-sensitivity, and
-  whitespace tolerance — 5 assertions, all passing).
+  whitespace tolerance — 9 cases / 13 assertions, all passing).
 - If the subject matches, `handle_agent_notification_activity` calls
   `broadcast_incident_update()` **directly** — the same fan-out used by the
   webhook — and skips the conversational reply entirely. If it doesn't
@@ -198,6 +200,28 @@ inspired by, and crediting, `Azure-Samples/m365-inbox-serverless-agent-python`
 — a real, tested pattern for the *inbound trigger* half of a
 conversation-independent incident-notification flow, built entirely on
 primitives this repo already had (the A365 `EMAIL_NOTIFICATION` channel).
+
+## 6. Sender visibility: CC'ing the original email sender
+
+The `[INCIDENT:<stage>]` email trigger (§5) is, in practice, usually sent by
+a real person (an on-call engineer forwarding an alert, a tester, etc.), not
+a pure machine system. Without any sender feedback, that person only sees
+the terse in-thread reply (`"Incident notification broadcast: {'executives':
+True, ...}"`) — the actual persona content only reaches the static
+`NOTIFY_<PERSONA>_EMAILS` distribution list, which is a UX gap for anyone
+using this as a demo or manual-test entry point.
+
+`handle_email_message()` (in `agent.py`) now extracts the sender's address
+from `context.activity.from_property.id` (confirmed via a live test — this
+is where the connector puts it; falls back to `.name` if `.id` is empty) and
+passes it to `broadcast_incident_update()` as `cc_recipients`. `notifications.
+broadcast()`/`send_persona_email()` add a Graph `ccRecipients` block to every
+persona email when `cc_recipients` is given. This is **additive only** — the
+`NOTIFY_<PERSONA>_EMAILS` `To` list is unchanged, so persona field-restriction
+semantics stay meaningful (the sender doesn't become a primary "technical" or
+"partners" recipient, they're just looped in on whichever emails go out).
+The `/api/incidents/notify` webhook path (§2) has no analogous "sender" and
+is unaffected — `cc_recipients` there defaults to `None`.
 
 ## End-to-end test procedure
 
@@ -237,7 +261,15 @@ sequenceDiagram
 
 1. Deploy the base repo per `docs/DEPLOYMENT.md` (App Service running, `AUTH_HANDLER_NAME` set, `a365 setup all` completed).
 2. Grant the **`Mail.Send`** consent from `docs/DEPLOYMENT.md` step 6b (in addition to step 6a's `Mail.Read`).
-3. Set at least one `NOTIFY_<PERSONA>_EMAILS` env var (e.g. `NOTIFY_TECHNICAL_EMAILS=you@yourtenant.com`) on the App Service and restart it -- personas with no recipients are silently skipped (by design, not a bug).
+3. Set at least one `NOTIFY_<PERSONA>_EMAILS` env var on the App Service and restart it -- personas with no recipients are silently skipped (by design, not a bug). Exact names (all singular `PERSONA`, not plural -- a live typo here, `NOTIFY_PARTNERS_EMAILS` vs the correct `NOTIFY_PARTNER_EMAILS`, silently skipped that persona for an entire test session):
+   ```bash
+   az webapp config appsettings set -g "rg-$AZURE_ENV_NAME" -n "<webAppName>" --settings \
+     NOTIFY_EXECUTIVES_EMAILS="you@yourtenant.com" \
+     NOTIFY_TECHNICAL_EMAILS="you@yourtenant.com" \
+     NOTIFY_VENUE_EMAILS="you@yourtenant.com" \
+     NOTIFY_PARTNER_EMAILS="you@yourtenant.com"
+   az webapp restart -g "rg-$AZURE_ENV_NAME" -n "<webAppName>"
+   ```
 4. Confirm the agentic identity's mailbox (`nocagent@<tenant>`) is licensed for Exchange Online (a Copilot/M365 license alone does not guarantee a mailbox -- `Mail.Send` will 403 without one).
 
 ### Step-by-step
@@ -275,6 +307,33 @@ sequenceDiagram
 
 This skips steps 1-2 above entirely (no Teams conversation/`conversation_id` needed):
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Sender as Any sender (e.g. on-call engineer)
+    participant Mbox as nocagent@<tenant> mailbox
+    participant Bot as Azure Bot Service (agents:email channel)
+    participant App as App Service (host_agent_server.py)
+    participant Agent as NocAgent (agent.py)
+    participant Graph as Microsoft Graph
+
+    Sender->>Mbox: Email, body first line = "[INCIDENT:ESCALATION]", Field: value lines follow
+    Mbox->>Bot: A365 email connector delivers as a "message" activity<br/>(channel_data has NO subject -- see bug #1 above)
+    Bot->>App: POST /api/messages
+    App->>App: on_message(): from_property.id -> sender_email
+    App->>Agent: handle_email_message("", body, ..., sender_email=sender_email)
+    Agent->>Agent: parse_incident_email() matches body's first line -> incident_context
+    Agent->>Agent: broadcast_incident_update(incident_context, cc_recipients=[sender_email])
+    Agent->>Agent: _exchange_user_token(scope=graph.microsoft.com/.default)
+    loop once per requested persona (default: all 4)
+        Agent->>Graph: POST /me/sendMail (To: NOTIFY_<PERSONA>_EMAILS, Cc: sender_email)
+        Graph-->>Agent: 202 Accepted
+    end
+    Agent-->>App: "Incident notification broadcast: {'executives': true, ...}"
+    App-->>Sender: brief in-thread reply (same as above)
+    Note over Sender,Graph: Sender ALSO receives each persona email via Cc --<br/>confirmed via live test (screenshot shows Cc: <sender>).
+```
+
 1. Send an email to the agentic identity's monitored inbox (`nocagent@<tenant>`, the same address Work IQ's `Mail.Read` already watches) with:
    - **Subject**: anything (e.g. `Sydney fibre cut test`) — it is not read on this path.
    - **Body**: the tag as the **first line**, then one `Field: value` pair per line. The
@@ -302,9 +361,9 @@ This skips steps 1-2 above entirely (no Teams conversation/`conversation_id` nee
      SLAStatus: At risk
      ```
 2. Confirm in App Insights that the message-activity email path fired, `parse_incident_email()` matched on the body's first line, and `broadcast_incident_update()` was invoked directly (look for a `dependencies` row showing a Graph `sendMail` call, not an IQ-tool `execute_tool` call).
-3. Verify delivery the same way as step 5 above (recipient inbox + agentic mailbox Sent Items) -- each persona email should show real values, with no literal `{Placeholder}` text remaining.
+3. Verify delivery the same way as step 5 above (recipient inbox + agentic mailbox Sent Items) -- each persona email should show real values, with no literal `{Placeholder}` text remaining, **and check that your own sender address appears in `Cc` on each one** (§6).
 4. **Negative check**: send an email whose body does NOT start with the tag (e.g. `"Question about last night's outage"`) and confirm it falls through to the normal conversational reply instead of broadcasting — proves the two code paths don't collide.
-5. Run the offline unit self-check any time without a live tenant: `python agent/test_parse_incident_email.py` (9 assertions covering subject-based and body-first-line tag matching, HTML stripping, case-sensitivity, and the untagged fallthrough).
+5. Run the offline unit self-check any time without a live tenant: `python agent/test_parse_incident_email.py` (9 cases / 13 assertions covering subject-based and body-first-line tag matching, HTML stripping, case-sensitivity, and the untagged fallthrough) and `python agent/notifications.py` (asserts all 4 personas render cleanly with no unrendered placeholders and no cross-persona leaks).
 
 ### What "working end to end" means here
 
@@ -314,6 +373,66 @@ matching their persona's template/field-restriction (§4 above), and the
 fail the way this doc says they should. If any of that diverges, it's a
 real bug in this reference implementation, not a documentation gap --
 file it against `agent/notifications.py` or `host_agent_server.py`.
+
+## Live E2E test results — 5 real bugs found and fixed
+
+This path (§5, the email trigger) was fully exercised against a live tenant,
+not just unit-tested in isolation. Five real bugs surfaced this way and are
+now fixed and deployed. Listed in the order discovered, since each was only
+reachable once the previous one was fixed:
+
+1. **Subject-based tag detection could never work.** The original design
+   assumed `[INCIDENT:<stage>]` would be read from the email Subject. Live
+   testing (a `logger.error()` diagnostic dump of `channel_data`) proved the
+   A365 email connector's "message" activity never transmits the Subject at
+   all — `channel_data` is only `{"tenant": {...}, "productContext":
+   "email"}`. Fixed by moving the tag convention to the **first line of the
+   body** instead (§5 above); `subject` is still checked first for
+   forward-compatibility, but never actually populated on this path.
+2. **Template file not deployed.** `notifications.py`'s `TEMPLATE_PATH`
+   resolved to the repo-root `data/runbooks/` directory, but `azure.yaml`'s
+   `project: agent` means only the `agent/` directory is packaged for the
+   App Service — every send failed with `[Errno 2] No such file or
+   directory`. Fixed by duplicating the template into
+   `agent/data/runbooks/customer_communication_template.md` and resolving
+   `TEMPLATE_PATH` relative to `agent/`. **Keep both copies in sync.**
+3. **`NOTIFY_PARTNER_EMAILS` vs `NOTIFY_PARTNERS_EMAILS` typo.** A live App
+   Service app setting was named with a trailing `S` that doesn't match
+   `notifications.py`'s `PERSONAS["partners"]["recipients_env"]` (singular,
+   matching `.env.template`) — the partners persona was silently always
+   skipped (no error; missing recipients is by design a silent skip). This
+   was a manual-configuration typo, not a code or template bug — double
+   check the exact env var name (singular `PARTNER`) if a persona seems to
+   never fire.
+4. **Docs example used field names no template recognizes.** The original
+   example test body used `Site`/`Severity`/`ETA`, which don't appear in
+   ANY persona's `{Placeholder}` set in
+   `data/runbooks/customer_communication_template.md` — so every delivered
+   email showed the literal, unsubstituted `{ServiceName}`/`{IncidentId}`/
+   etc. text. Fixed by correcting the example (§5's body sample above) to
+   use the template's real field names. **Field names are case-sensitive
+   and must match the template's Variable Reference exactly** — this is a
+   test-authoring gotcha, not a code bug (unmatched placeholders render as
+   literal `{Name}` text by design, via `notifications.py`'s `_SafeDict`,
+   rather than raising — so a wrong field name fails silently/visibly in
+   the delivered email rather than with an exception).
+5. **`partners` persona leaked the template's trailing "Variable Reference"
+   table.** `_extract_persona_section()` bounded each `### Persona: X`
+   section by searching only for the next `### ` heading. `partners` is the
+   LAST persona section in the file, followed by a `## Variable Reference`
+   (level-2) heading — which `\n### ` never matched — so the entire
+   trailing reference table (plus a `---` separator) was appended to and
+   sent in every partners persona email. Fixed to stop at any markdown
+   heading level and strip a trailing `---` rule; `notifications.py`'s
+   `_demo()` self-check now asserts no `{` remains in the body (previously
+   only checked the subject) and specifically guards against this
+   "Variable Reference" leak regressing.
+
+**Confirmed working, live, via real Outlook/Graph screenshots**: the
+`technical` persona email rendered its subject
+(`[ESCALATION] Sydney-Melbourne Fibre — INC-TEST-002 — technical detail`)
+and body fully substituted, with the sender correctly shown in `Cc`, and no
+`{Placeholder}` text or leaked content remaining — across all 4 personas.
 
 ## Limitations (PoC-honest, read before Accenture builds further)
 
@@ -343,8 +462,9 @@ file it against `agent/notifications.py` or `host_agent_server.py`.
   target which `conversation_id`. Add one before exposing this beyond a
   single trusted internal caller (e.g. Azure Monitor action group).
 
-None of this has been tested against a live tenant in this session (the
-demo resource group was already torn down) — it is unit-tested at the
-templating/parsing layer only (`python agent/notifications.py`). Validate
-the Graph `sendMail` call and the `Mail.Send` consent grant end-to-end
-against a real tenant before relying on this path.
+**Update**: this path WAS subsequently tested end to end against a live
+tenant (see "Live E2E test results" above) — both trigger paths, all 4
+personas, real Graph `sendMail` calls, real inbox verification, sender-CC
+verification. The 5 bugs that testing found are fixed and deployed. The
+limitations listed above are still accurate — they're deliberate scope
+decisions, not things the testing missed.
