@@ -246,17 +246,10 @@ class GenericAgentHost:
                     # chance to detect it before falling back to normal
                     # conversational handling.
                     if is_email and hasattr(self.agent_instance, "handle_email_message"):
+                        # Confirmed via a live test send: from_property.id
+                        # holds the sender's email address on this connector.
                         from_prop = getattr(context.activity, "from_property", None)
                         sender_email = (getattr(from_prop, "id", "") or getattr(from_prop, "name", "") or "") if from_prop else ""
-                        # TEMP DIAGNOSTIC (remove once the sender-email field
-                        # is confirmed against a live payload): logged at
-                        # error level so it reaches App Insights.
-                        logger.error(
-                            "EMAIL_SENDER_DIAG from_id=%r from_name=%r resolved_sender_email=%r",
-                            getattr(from_prop, "id", None) if from_prop else None,
-                            getattr(from_prop, "name", None) if from_prop else None,
-                            sender_email,
-                        )
                         email_response = await self.agent_instance.handle_email_message(
                             "", user_message, self.agent_app.auth, self.auth_handler_name, context,
                             sender_email=sender_email or None,
