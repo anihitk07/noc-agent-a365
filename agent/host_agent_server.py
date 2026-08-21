@@ -262,15 +262,27 @@ class GenericAgentHost:
                     if not is_email:
                         await context.send_activity(Activity(type="typing"))
 
-                        async def _typing_loop():
-                            try:
-                                while True:
-                                    await asyncio.sleep(4)
-                                    await context.send_activity(Activity(type="typing"))
-                            except asyncio.CancelledError:
-                                pass
+                        # ponytail: the recurring typing-indicator task below
+                        # runs concurrently with agent.run()'s own MCP tool
+                        # connect and appears to race with agent_framework's
+                        # anyio-based MCP client (same cross-task cancel-scope
+                        # hazard class already documented in agent.py's
+                        # module docstring / docs/TROUBLESHOOTING.md), so it
+                        # can be disabled via TYPING_INDICATOR_LOOP=false as a
+                        # same-day mitigation without touching the MCP client
+                        # itself. Default stays on; only the recurring
+                        # refresh is skipped when disabled -- the initial
+                        # typing activity above is unaffected.
+                        if os.getenv("TYPING_INDICATOR_LOOP", "true").lower() not in ("false", "0"):
+                            async def _typing_loop():
+                                try:
+                                    while True:
+                                        await asyncio.sleep(4)
+                                        await context.send_activity(Activity(type="typing"))
+                                except asyncio.CancelledError:
+                                    pass
 
-                        typing_task = asyncio.create_task(_typing_loop())
+                            typing_task = asyncio.create_task(_typing_loop())
 
                     try:
                         response = await self.agent_instance.process_user_message(

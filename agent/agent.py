@@ -55,13 +55,16 @@ docs/TROUBLESHOOTING.md's "Foundry project RBAC" entry.)
 
 
 import asyncio
+import base64
 import json
 import logging
 import os
 import re
+import time
 from typing import Optional
 
 from agent_framework import Agent, MCPStreamableHTTPTool, Message
+from agent_framework.exceptions import ToolException
 from agent_framework.foundry import FoundryChatClient
 from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import MCPToolboxTool
@@ -131,6 +134,10 @@ GRAPH_MAIL_TOKEN_SCOPES = os.getenv("GRAPH_MAIL_TOKEN_SCOPES", "https://graph.mi
 # server-side, so agent.run() keeps its own wall-clock cap rather than being
 # able to hang the turn forever if Foundry's own tool-call plumbing stalls.
 AGENT_RUN_TIMEOUT_SECONDS = float(os.getenv("AGENT_RUN_TIMEOUT_SECONDS", "90"))
+# ponytail: bounded retry for the "Cancelled via cancel scope" MCP-connect
+# race documented in docs/TROUBLESHOOTING.md -- see process_user_message.
+MCP_CONNECT_MAX_ATTEMPTS = int(os.getenv("MCP_CONNECT_MAX_ATTEMPTS", "3"))
+MCP_CONNECT_RETRY_DELAY_SECONDS = float(os.getenv("MCP_CONNECT_RETRY_DELAY_SECONDS", "1.0"))
 
 NOC_AGENT_INSTRUCTIONS = """You are the NOC/NOA network operations assistant for a telecom
 provider. You help on-call engineers triage incidents such as fibre cuts, router failures,
@@ -192,6 +199,19 @@ def _get_service_credential():
     if "WEBSITE_INSTANCE_ID" in os.environ:
         return ManagedIdentityCredential()
     return AzureDeveloperCliCredential(tenant_id=AZURE_TENANT_ID, process_timeout=60)
+
+
+def _jwt_exp_epoch(token: str, default_ttl_seconds: float = 300.0) -> float:
+    """Best-effort JWT `exp` claim (unverified -- we already trust this token, we're
+    only reading its own stated expiry to know when to stop reusing it from cache).
+    Falls back to a short default TTL if the token isn't a standard 3-part JWT.
+    """
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)  # restore stripped base64url padding
+        return float(json.loads(base64.urlsafe_b64decode(payload_b64))["exp"])
+    except Exception:  # noqa: BLE001
+        return time.time() + default_ttl_seconds
 
 
 _WORK_IQ_CONSENT_PREFIX = "Work IQ needs your consent before it can access this data. Please open: "
@@ -296,6 +316,14 @@ class NocAgent(AgentInterface):
         self._agent: Optional[Agent] = None
         # Per-user conversation history for context continuity across turns.
         self._conversations: dict[str, list] = {}
+        # ponytail: (user_id, scope) -> (token, exp_epoch). _exchange_user_token
+        # was re-running the A365 SDK's full OBO broker (several sequential
+        # Graph/Observability/ai.azure.com round trips, ~5-6s) on every single
+        # turn even when the previous token was still valid -- caching it here
+        # cuts that to zero on cache hits, which also removes several seconds
+        # of event-loop-blocking work sitting immediately before the MCP
+        # connect (a suspect in the "cancel scope" crash investigation).
+        self._token_cache: dict[tuple[str, str], tuple[str, float]] = {}
 
     # -------------------------------------------------------------------
     # LIFECYCLE
@@ -398,32 +426,27 @@ class NocAgent(AgentInterface):
     def _build_turn_tool(self, foundry_user_token: Optional[str]) -> Optional[MCPStreamableHTTPTool]:
         """Build the single Toolbox MCP tool for this turn.
 
-        The Toolbox itself resolves each bundled connection's own auth
-        (CustomKeys for Web IQ, service identity for Foundry IQ). Fabric
-        IQ/Work IQ's UserEntraToken connections instead forward whatever
-        identity authenticated *this HTTP call to the toolbox* -- so the
-        calling Teams user's OBO token is injected here as the Authorization
-        header when available; otherwise the toolbox call (and therefore
-        Fabric IQ/Work IQ) falls back to the service identity, in which case
-        those two tools will simply return "no access"/empty results rather
-        than another user's data (graceful degradation, same contract as
-        before).
+        Authenticates the outer HTTP call to the toolbox MCP endpoint as the
+        calling Teams user's OBO token when available (falls back to the
+        service identity otherwise), so Fabric IQ/Work IQ's UserEntraToken
+        connections can forward that identity downstream. Requires the
+        calling user to hold "Azure AI Developer" (or "Foundry User" +
+        appropriate access) scoped to the *project* resource specifically
+        (`.../accounts/{account}/projects/{project}`) -- an assignment
+        scoped only to the parent account is NOT honored by this data-plane
+        endpoint's authorization check, unlike most ARM RBAC which inherits
+        downward. This was the actual root cause of a lengthy "cancel
+        scope"/403 investigation; see docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md.
         """
         if not self._toolbox_mcp_url:
             logger.error("❌ No toolbox MCP URL available -- this turn will have no tools")
             return None
 
-        if foundry_user_token:
-            bearer_token = foundry_user_token
-        else:
-            logger.warning(
-                "⚠️ No user OBO token this turn — Fabric IQ/Work IQ (identity passthrough) "
-                "will fall back to the service identity and likely return no data"
-            )
-            bearer_token = self._service_credential.get_token(FOUNDRY_USER_TOKEN_SCOPES).token
+        bearer_token = foundry_user_token or self._service_credential.get_token(FOUNDRY_USER_TOKEN_SCOPES).token
 
         def _header_provider(_kwargs: dict) -> dict[str, str]:
-            return {"Authorization": f"Bearer {bearer_token}"}
+            auth_scheme = "Bearer"
+            return {"Authorization": auth_scheme + " " + bearer_token}
 
         return MCPStreamableHTTPTool(
             name="noc-iq-toolbox",
@@ -451,15 +474,66 @@ class NocAgent(AgentInterface):
         logger.info("📨 Message from %s (%s): %s...", display_name, user_id, message[:80])
 
         foundry_user_token = await self._exchange_user_token(
-            auth, auth_handler_name, context, FOUNDRY_USER_TOKEN_SCOPES
+            auth, auth_handler_name, context, FOUNDRY_USER_TOKEN_SCOPES, user_id=user_id
         )
         history: list[Message] = self._conversations.get(user_id, [])
         history.append(Message("user", [message]))
 
-        turn_tool = self._build_turn_tool(foundry_user_token)
-        turn_tools = [turn_tool] if turn_tool else []
+        async def _run_turn() -> "AgentResponse":
+            # ponytail: self._agent is a long-lived singleton (see initialize()),
+            # and agent_framework.Agent.run() -- when handed `tools=[...]` that
+            # aren't already connected -- registers each MCP tool on the
+            # *Agent's own* `_async_exit_stack`, which is created once in
+            # Agent.__init__ and only ever closed by the Agent's own
+            # __aexit__ (never called here, since the Agent lives for the
+            # process lifetime). Every turn's fresh MCPStreamableHTTPTool was
+            # therefore piling onto one shared, never-closed exit stack across
+            # concurrent turns/tasks -- the exact shape that trips anyio's
+            # "cancel scope in a different task" check and was surfacing as
+            # `MCP server failed to initialize: Cancelled via cancel scope`
+            # on every single turn. Connecting/disconnecting the tool
+            # ourselves here, scoped to this turn's own task via `async with`,
+            # means it's already `is_connected` by the time `agent.run()`
+            # looks at it, so agent_framework skips the shared exit stack
+            # entirely for this tool.
+            #
+            # ponytail: even with the tool disconnected from the shared exit
+            # stack above, the SAME "Cancelled via cancel scope" error was
+            # still reproducible in complete isolation (a standalone script,
+            # no Agent/host/concurrency at all) -- but only intermittently,
+            # and traces show the A365 hosting SDK's own agentic-token-broker
+            # calls (Graph / Observability / ai.azure.com scopes, several
+            # round trips) run just before the MCP connect and appear to
+            # briefly stall the event loop; when the MCP transport's
+            # initialize() finally gets scheduled after that stall, its
+            # internal anyio timing gets corrupted. This looks like a
+            # transient race in agent_framework/the hosting SDK, not a
+            # deterministic bug in our code -- so retry with a *fresh* tool
+            # instance (a clean cancel-scope/session) a couple of times
+            # before giving up.
+            last_exc: Optional[BaseException] = None
+            for attempt in range(1, MCP_CONNECT_MAX_ATTEMPTS + 1):
+                tool = self._build_turn_tool(foundry_user_token)
+                turn_tools = [tool] if tool else []
+                try:
+                    if tool is not None:
+                        async with tool:
+                            return await self._agent.run(history, tools=turn_tools)
+                    return await self._agent.run(history, tools=turn_tools)
+                except ToolException as exc:
+                    last_exc = exc
+                    if "cancel scope" not in str(exc).lower() or attempt == MCP_CONNECT_MAX_ATTEMPTS:
+                        raise
+                    logger.warning(
+                        "⚠️ MCP connect hit a cancel-scope race (attempt %d/%d), retrying with a fresh tool: %s",
+                        attempt,
+                        MCP_CONNECT_MAX_ATTEMPTS,
+                        exc,
+                    )
+                    await asyncio.sleep(MCP_CONNECT_RETRY_DELAY_SECONDS)
+            raise last_exc  # pragma: no cover -- unreachable, loop always returns or raises
 
-        run_task = asyncio.ensure_future(self._agent.run(history, tools=turn_tools))
+        run_task = asyncio.ensure_future(_run_turn())
         try:
             response = await asyncio.wait_for(asyncio.shield(run_task), timeout=AGENT_RUN_TIMEOUT_SECONDS)
             self._conversations[user_id] = history + [Message("assistant", [response.text])]
@@ -491,12 +565,9 @@ class NocAgent(AgentInterface):
             logger.error("❌ Error processing message: %s", exc, exc_info=True)
             self._conversations.pop(user_id, None)
             return f"Sorry, I encountered an error: {exc}"
-        finally:
-            if turn_tool is not None:
-                try:
-                    await turn_tool.close()
-                except Exception:  # noqa: BLE001
-                    logger.debug("Toolbox tool close() raised (non-fatal)", exc_info=True)
+        # ponytail: no explicit `finally: tool.close()` here anymore -- each
+        # attempt's tool is opened/closed via `async with tool:` inside
+        # _run_turn() itself, scoped to that attempt's own task.
 
     # -------------------------------------------------------------------
     # NOTIFICATION HANDLING (A365 email / Word-comment triggers)
@@ -623,6 +694,7 @@ class NocAgent(AgentInterface):
         auth_handler_name: Optional[str],
         context: TurnContext,
         scope: str,
+        user_id: Optional[str] = None,
     ) -> Optional[str]:
         """Get a user-delegated token via the AgenticUserAuthorization handler.
 
@@ -636,10 +708,22 @@ class NocAgent(AgentInterface):
         Work IQ -> its own audience) -- so only one token exchange is needed
         here, unlike the old local-MCP-client design which needed a separate
         per-tool-audience token (see docs/TROUBLESHOOTING.md).
+
+        ponytail: cached per (user_id, scope) for the token's own lifetime
+        (minus a 60s safety margin) when `user_id` is supplied -- see
+        `self._token_cache`. Skips the cache entirely (old behaviour) when
+        `user_id` is None, e.g. the outbound-notification path.
         """
         if not auth_handler_name:
             logger.warning("⚠️ No auth handler configured — Fabric IQ/Work IQ will be unavailable this turn")
             return None
+
+        cache_key = (user_id, scope) if user_id else None
+        if cache_key:
+            cached = self._token_cache.get(cache_key)
+            if cached and cached[1] > time.time():
+                logger.info("✅ Reusing cached OBO token for scope %s (no broker round trip)", scope)
+                return cached[0]
 
         try:
             token_response = await auth.exchange_token(
@@ -647,6 +731,11 @@ class NocAgent(AgentInterface):
             )
             if token_response and token_response.token:
                 logger.info("✅ User OBO token acquired (len=%d)", len(token_response.token))
+                if cache_key:
+                    self._token_cache[cache_key] = (
+                        token_response.token,
+                        _jwt_exp_epoch(token_response.token) - 60,
+                    )
                 return token_response.token
             logger.warning("⚠️ Token exchange returned empty response")
         except Exception as exc:  # noqa: BLE001

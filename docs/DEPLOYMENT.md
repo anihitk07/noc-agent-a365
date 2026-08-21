@@ -177,59 +177,63 @@ See `docs/TROUBLESHOOTING.md`'s "Auth-type mistakes" section for how to find
 the agent identity/agent-user object ids (visible as `agentic_user_id` in
 Application Insights `traces` once a user has messaged the agent once).
 
-### 4c. Create the Fabric IQ Foundry project connection (required — not automated by any script)
+### 4c. Create the Fabric IQ + Work IQ Foundry project connections (automated)
 
 **Neither `create_fabric_ontology.py` nor `create_fabric_data_agent.py`
 creates a Foundry project connection.** They only touch Fabric-side
 resources (workspace, lakehouse, ontology, Data Agent). `agent.py` resolves
 Fabric IQ via `self._project_client.connections.get("fabric-iq-connection")`
-— if that connection doesn't exist, it's silently caught and skipped
-(Fabric IQ just never appears in the toolbox, no error at startup). Create
-it directly against ARM, mirroring the same `UserEntraToken` pattern
-`scripts/create_workiq_toolbox.py` uses for Work IQ:
+and Work IQ via `.get("WorkIQ")` -- if either doesn't exist, it's silently
+caught and skipped (that tool just never appears in the toolbox, no error at
+startup; you'll see `Could not resolve connection '<name>' (<key> tool
+disabled)` in the logs). Foundry IQ's `kb-mcp-connection` and Web IQ's
+`web-iq-connection` are already provisioned declaratively by
+`infra/core/ai/ai-project.bicep` at `azd provision` time -- only these two
+have no Bicep resource type and must be created imperatively, every time
+against a fresh RG (and again if the Fabric Data Agent is ever recreated,
+since fabric-iq-connection's `target` must track its MCP URL).
 
-```bash
-FABRIC_DATA_AGENT_MCP_URL="<printed by create_fabric_data_agent.py in step 4, also in .env>"
-ARM_TOKEN=$(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)
-curl -s -X PUT \
-  "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/rg-$AZURE_ENV_NAME/providers/Microsoft.CognitiveServices/accounts/$AZURE_AI_ACCOUNT_NAME/projects/$AZURE_AI_PROJECT_NAME/connections/fabric-iq-connection?api-version=2025-06-01" \
-  -H "Authorization: Bearer $ARM_TOKEN" -H "Content-Type: application/json" \
-  -d "{\"properties\": {\"authType\": \"UserEntraToken\", \"category\": \"RemoteTool\", \"target\": \"$FABRIC_DATA_AGENT_MCP_URL\", \"audience\": \"https://api.fabric.microsoft.com\", \"group\": \"GenericProtocol\", \"isSharedToAll\": false, \"metadata\": {\"type\": \"custom_MCP\"}}}"
-```
-
-The `audience` here must match the scope consented in §4b step 1
-(`https://api.fabric.microsoft.com`) so the OBO exchange mints a
-Fabric-scoped token for this connection's identity passthrough. Verify with
-a `GET` on the same URL — `properties.authType` should read
-`UserEntraToken`. (The account-rp connections API is intermittently flaky
-and can return a bare `500`; retry the `PUT` once or twice if so, same as
-`create_workiq_toolbox.py` does for Work IQ.)
-
-## 5. Web IQ
-
-If `webIqApiKey` was set in step 2, the connection already exists — skip this
-step. Otherwise, add it manually in the Foundry portal: **Tools → + Add tool
-→ Custom MCP**, auth type `CustomKeys`, header `x-apikey`, target
-`https://api.microsoft.ai/v3/mcp`.
-
-## 6. Work IQ
-
-Work IQ has no dedicated SDK connection class, and the Foundry portal's
-"Add connection" wizard defaults new Work IQ connections to `authType: OAuth2`
-(interactive browser consent) — that works fine in the Foundry **playground**
-but dead-ends in Teams/A365 (a non-interactive caller) with a repeating
-`oauth_consent_request` loop, silently falling back to a hallucinated answer.
-
-Use `scripts/create_workiq_toolbox.py` instead, which creates the connection
-correctly:
+Run the single combined script instead of the raw ARM `curl` call this used
+to require:
 
 ```bash
 cd scripts
-python create_workiq_toolbox.py
+python refresh_iq_connections.py
 ```
 
-This `PUT`s the Foundry project connection `WorkIQ` directly against ARM with
-`authType: UserEntraToken` (identity passthrough — Foundry forwards the
+This runs, in order: `create_fabric_data_agent.py` (Fabric Data Agent, needed
+first since its MCP URL is the Fabric IQ connection's `target`),
+`create_fabric_iq_connection.py` (the `fabric-iq-connection` project
+connection, `authType: UserEntraToken`, `audience: https://api.fabric.microsoft.com`
+-- must match the scope consented in section 4b step 1), and
+`create_workiq_toolbox.py` (the `WorkIQ` project connection, also
+`authType: UserEntraToken`). All three are idempotent -- safe to re-run any
+time a connection is missing or stale; each step no-ops if already correct.
+(The account-rp connections API is intermittently flaky and can return a
+bare `500`; both connection scripts retry automatically.)
+
+After running it, **restart the app** (`az webapp restart`) so `agent.py`'s
+`initialize()` re-reads the connections and rebuilds the toolbox with all 4
+tools -- it only resolves connections once, at process startup.
+
+## 5. Web IQ
+
+Provisioned automatically by Bicep if `webIqApiKey` was set in step 2 -- no
+action needed. Otherwise, add it manually in the Foundry portal:
+**Tools -> + Add tool -> Custom MCP**, auth type `CustomKeys`, header
+`x-apikey`, target `https://api.microsoft.ai/v3/mcp`.
+
+## 6. Work IQ
+
+Work IQ has no dedicated SDK connection class or Bicep resource type, and the
+Foundry portal's "Add connection" wizard defaults new Work IQ connections to
+`authType: OAuth2` (interactive browser consent) -- that works fine in the
+Foundry **playground** but dead-ends in Teams/A365 (a non-interactive caller)
+with a repeating `oauth_consent_request` loop, silently falling back to a
+hallucinated answer. This is created by `refresh_iq_connections.py` in step
+4c above (or standalone: `python create_workiq_toolbox.py`), which `PUT`s the
+Foundry project connection `WorkIQ` directly against ARM with
+`authType: UserEntraToken` (identity passthrough -- Foundry forwards the
 caller's own Entra token via OBO and mints a Work IQ-scoped token; no
 client secret or Entra app registration required, unlike an OAuth2
 connection). Target `https://workiq.svc.cloud.microsoft/mcp`, audience
@@ -255,6 +259,27 @@ the correct config).
 `McpServers.Mail.All`, `McpServers.Teams.All`, `McpServersMetadata.Read.All`
 scopes — applied by `a365 setup all` (step 8), separate from the Foundry
 connection above.
+
+> **Known-broken as of 2026-08-21**: despite the above, live testing in this
+> environment now fails with `AADSTS500016: Application
+> 'fdcc1f02-fc51-4226-8753-f668596af7f7' is not supported as a resource
+> application to execute the flow` on every Work IQ call — the
+> `UserEntraToken`/bare-audience approach above is **not** what Microsoft's
+> own Foundry+Work IQ quickstart documents
+> (<https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/mcp/quickstart/foundry>),
+> which instead requires a dedicated **OAuth2** connection: a BYO Entra app
+> registration (client ID + secret), the `WorkIQAgent.Ask` delegated
+> permission with tenant admin consent, and a Foundry-managed OAuth
+> redirect-URI added back to the app registration (Authorization/Token URLs
+> `https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/{authorize,token}`,
+> scopes `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask,offline_access`).
+> That flow also expects a **first-time interactive user consent/sign-in
+> prompt** the first time each user calls Work IQ, which doesn't fit this
+> project's headless A365/Teams runtime without further work. Until a
+> working connection type is confirmed for this scenario, treat Work IQ as
+> **not functional** — do not assume the `UserEntraToken` connection above
+> works without retesting it fresh. See
+> `docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md` for the full investigation.
 
 ### 6a. Grant Work IQ's Graph delegated-permission consent (required, one-time)
 
@@ -471,17 +496,37 @@ Use the dedicated Agents surface instead:
 
 ## 9c. Grant the agentic user identity the Foundry project RBAC roles
 
-**Required — without this, every turn fails with a 403, not just a degraded
-tool.** The chat client/agent are built with a fixed **service** credential
-(the app's managed identity), but Fabric IQ/Work IQ's `UserEntraToken`
-connections still need OBO identity passthrough for the calling Teams user —
-handled one layer down, at the per-turn MCP tool's `header_provider` (see
-`docs/ARCHITECTURE.md`). That means the calling Teams user's own agentic
-identity also needs RBAC **on the Foundry project** — a separate surface from
-anything the app's managed identity holds on the Cognitive Services account.
-Grant these roles to the auto-provisioned agentic user identity (its object
-id appears in Application Insights `traces` as `agentic_user_id`, once the
-human user has messaged the agent at least once so the identity exists):
+**Required — without this, every turn fails, either with a 403 on the
+Responses API call or with a misleading `"Cancelled via cancel scope ..."`
+error on the toolbox MCP call (an anyio/MCP-library quirk that mis-surfaces
+a plain data-plane 403 as a task-cancellation error — see
+`docs/TROUBLESHOOTING.md`'s "Auth-type mistakes" entry and
+`docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md`).** The chat client/agent are built
+with a fixed **service** credential (the app's managed identity), but
+Fabric IQ/Work IQ's `UserEntraToken` connections still need OBO identity
+passthrough for the calling Teams user — handled one layer down, at the
+per-turn MCP tool's `header_provider` (see `docs/ARCHITECTURE.md`). That
+means the calling Teams user's own agentic identity also needs RBAC **on
+the Foundry project** — a separate surface from anything the app's managed
+identity holds on the Cognitive Services account, AND separate from
+account-scope RBAC (an assignment scoped only to the parent account is
+**not** honored by either data-plane call below; it must be scoped to the
+project resource itself).
+
+Two independent API surfaces need their own roles at the project scope:
+
+**For the toolbox MCP endpoint** (every tool call — this is what the
+"cancel scope" error above actually was):
+
+```bash
+az role assignment create \
+  --assignee-object-id <agentic_user_id> \
+  --assignee-principal-type User \
+  --role "Azure AI Developer" \
+  --scope <Foundry project ARM resource id>
+```
+
+**For the direct Responses API call** (the chat completion itself):
 
 ```bash
 az role assignment create \
@@ -516,10 +561,17 @@ cover this action alone. If a future cleanup pass reconfirms
 `Foundry Project Runtime User` alone is sufficient, the other three can be
 dropped to keep the RBAC model minimal.
 
-This must be repeated for every new distinct human user of the agent (each
-gets their own agentic user identity). RBAC propagation can take a couple of
-minutes before the next turn succeeds. See `docs/TROUBLESHOOTING.md`'s
-"Foundry project RBAC" entry for the full symptom/diagnosis.
+**Assign to an AAD group instead of per-user, to avoid repeating this for
+every new user.** Rather than repeating all of the above for each new
+distinct human user's auto-provisioned agentic identity, create/use an AAD
+group (e.g. `noc-iq-demo-teams-users`), add every Teams user who should
+have access as a member, and run each `az role assignment create` above
+once with `--assignee-object-id <group_object_id> --assignee-principal-type
+Group` instead of a per-user `--assignee-object-id`/`User`. New users then
+just need adding to the group — no new role assignment. RBAC propagation
+can still take a couple of minutes before the next turn succeeds either way.
+See `docs/TROUBLESHOOTING.md`'s "Foundry project RBAC" entry for the full
+symptom/diagnosis of the Responses API case.
 
 ## 10. Verify end-to-end
 
