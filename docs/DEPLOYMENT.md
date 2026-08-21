@@ -225,29 +225,66 @@ action needed. Otherwise, add it manually in the Foundry portal:
 
 ## 6. Work IQ
 
-Work IQ has no dedicated SDK connection class or Bicep resource type, and the
-Foundry portal's "Add connection" wizard defaults new Work IQ connections to
-`authType: OAuth2` (interactive browser consent) -- that works fine in the
-Foundry **playground** but dead-ends in Teams/A365 (a non-interactive caller)
-with a repeating `oauth_consent_request` loop, silently falling back to a
-hallucinated answer. This is created by `refresh_iq_connections.py` in step
-4c above (or standalone: `python create_workiq_toolbox.py`), which `PUT`s the
-Foundry project connection `WorkIQ` directly against ARM with
-`authType: UserEntraToken` (identity passthrough -- Foundry forwards the
-caller's own Entra token via OBO and mints a Work IQ-scoped token; no
-client secret or Entra app registration required, unlike an OAuth2
-connection). Target `https://workiq.svc.cloud.microsoft/mcp`, audience
-`fdcc1f02-fc51-4226-8753-f668596af7f7` (`api://workiq.svc.cloud.microsoft`,
-scope `WorkIQAgent.Ask`).
+Work IQ has no dedicated SDK connection class or Bicep resource type. An
+earlier attempt used `authType: UserEntraToken` (OBO identity passthrough,
+no client secret required) on the theory that Foundry could mint a
+Work IQ-scoped token directly from the caller's own Entra token -- **this
+does not work**: it fails on every call with `AADSTS500016: Application
+'fdcc1f02-fc51-4226-8753-f668596af7f7' is not supported as a resource
+application to execute the flow`. Work IQ's resource app does not support
+being the target of a bare OBO flow.
+
+**Resolved 2026-08-21**: Work IQ requires a dedicated **OAuth2** connection
+per Microsoft's own quickstart
+(<https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/mcp/quickstart/foundry>).
+This is now automated by `scripts/create_workiq_toolbox.py` (called from
+`refresh_iq_connections.py`), which `PUT`s the Foundry project connection
+`WorkIQ` against ARM with `authType: OAuth2`, target
+`https://workiq.svc.cloud.microsoft/mcp`, Authorization/Token/Refresh URLs
+`https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/{authorize,token}`,
+and scopes `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask,offline_access`.
+
+Unlike the other three IQ connections, this one needs a **dedicated Entra
+app registration with a client secret** (the script does not create the app
+registration itself -- do that once per environment):
+
+```bash
+# 1. Create the app registration with the WorkIQAgent.Ask delegated permission
+#    (resource appId fdcc1f02-fc51-4226-8753-f668596af7f7, scope id
+#    0b1715fd-f4bf-4c63-b16d-5be31f9847c2).
+az ad app create --display-name "noc-agent-workiq" --sign-in-audience AzureADMyOrg \
+  --required-resource-accesses '@workiq-required-resource-access.json'
+  # file contents:
+  # [{"resourceAppId":"fdcc1f02-fc51-4226-8753-f668596af7f7",
+  #   "resourceAccess":[{"id":"0b1715fd-f4bf-4c63-b16d-5be31f9847c2","type":"Scope"}]}]
+
+# 2. Create its service principal and a client secret.
+az ad sp create --id "<appId from step 1>"
+az ad app credential reset --id "<appId>" --display-name "noc-agent-workiq-secret" --years 1
+  # copy the returned "password" -- it is only shown once.
+
+# 3. Grant tenant admin consent for WorkIQAgent.Ask (requires Global Administrator).
+az ad app permission admin-consent --id "<appId>"
+
+# 4. Run the connection script with the app's credentials.
+$env:WORKIQ_ENTRA_APP_ID = "<appId>"
+$env:WORKIQ_ENTRA_APP_SECRET = "<client secret from step 2>"
+python scripts/create_workiq_toolbox.py
+```
+
+The script's final step prints a Foundry-generated OAuth redirect URL
+(`https://global.consent.azure-apim.net/redirect/<id>`) -- **add this back**
+to the app registration's Authentication > Web platform Redirect URIs
+(`az ad app update --id <appId> --web-redirect-uris "<redirect url>"`) or the
+first-time consent flow will fail. Also grant the app's service principal
+`Azure AI Developer` at **project scope** (same pattern as step 9c below).
 
 That connection is the *only* Work IQ resource `agent/agent.py` needs: it
 resolves Work IQ purely by looking up the `WorkIQ` project connection by name
 (`WORK_IQ_CONNECTION_NAME`, default `WorkIQ`) and wraps it into its own
 `noc-iq-toolbox` alongside the other three IQ connections (see
 `docs/ARCHITECTURE.md`) — there is no separate, dedicated Work IQ toolbox to
-create or reference. (An earlier version of this script also created a
-standalone `work-iq-tools` toolbox; that call was dead code for this
-architecture and has been removed — do not recreate it.)
+create or reference.
 
 The account-rp preview connections API is intermittently flaky and returns a
 bare `500 InternalServerError`; the script retries with a short backoff and is
@@ -260,26 +297,16 @@ the correct config).
 scopes — applied by `a365 setup all` (step 8), separate from the Foundry
 connection above.
 
-> **Known-broken as of 2026-08-21**: despite the above, live testing in this
-> environment now fails with `AADSTS500016: Application
-> 'fdcc1f02-fc51-4226-8753-f668596af7f7' is not supported as a resource
-> application to execute the flow` on every Work IQ call — the
-> `UserEntraToken`/bare-audience approach above is **not** what Microsoft's
-> own Foundry+Work IQ quickstart documents
-> (<https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/mcp/quickstart/foundry>),
-> which instead requires a dedicated **OAuth2** connection: a BYO Entra app
-> registration (client ID + secret), the `WorkIQAgent.Ask` delegated
-> permission with tenant admin consent, and a Foundry-managed OAuth
-> redirect-URI added back to the app registration (Authorization/Token URLs
-> `https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/{authorize,token}`,
-> scopes `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask,offline_access`).
-> That flow also expects a **first-time interactive user consent/sign-in
-> prompt** the first time each user calls Work IQ, which doesn't fit this
-> project's headless A365/Teams runtime without further work. Until a
-> working connection type is confirmed for this scenario, treat Work IQ as
-> **not functional** — do not assume the `UserEntraToken` connection above
-> works without retesting it fresh. See
-> `docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md` for the full investigation.
+> **Still not fully automatable**: the OAuth2 connection above satisfies
+> every step Microsoft's quickstart marks as admin-side setup, but Work IQ
+> connections use **delegated** Entra auth -- the **first call from each
+> signed-in user** still requires a one-time interactive OAuth consent/
+> sign-in prompt in a browser. This does not fit cleanly into a headless
+> Teams/A365 turn; `agent/agent.py` has a `_WORK_IQ_CONSENT_PREFIX` constant
+> intended to relay a consent link through Teams chat for exactly this case,
+> but end-to-end behavior in Teams has not yet been verified this session.
+> See `docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md` for the full investigation.
+
 
 ### 6a. Grant Work IQ's Graph delegated-permission consent (required, one-time)
 
