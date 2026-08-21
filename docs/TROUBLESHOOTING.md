@@ -26,7 +26,7 @@ so it can be rebuilt exactly if the graph ever needs to be recreated again.
 | MPLSPath | DimMPLSPath | PathId | pathType→PathType |
 | Advisory | DimAdvisory | AdvisoryId | vendorName→VendorName, severity→Severity, title→Title |
 
-**Edges** (`Add edge` x6, only after all 8 nodes above exist and are saved):
+**Edges** (`Add edge` x8, only after all 8 nodes above exist and are saved):
 
 | Edge label | Source table | Origin node | Origin key | Target node | Target key |
 |---|---|---|---|---|---|
@@ -36,6 +36,20 @@ so it can be rebuilt exactly if the graph ever needs to be recreated again.
 | AMPLIFIES | FactAmplifierMapping | AmplifierSite | SiteId | TransportLink | LinkId |
 | COVERS | DimSLAPolicy | SLAPolicy | SLAPolicyId | Service | ServiceId |
 | AFFECTS | FactAdvisoryMapping | Advisory | AdvisoryId | CoreRouter | RouterId |
+| TRAVERSES_ROUTER | FactMPLSPathHops (filter `NodeType = "CoreRouter"`) | MPLSPath | PathId | CoreRouter | NodeId |
+| TRAVERSES_LINK | FactMPLSPathHops (filter `NodeType = "TransportLink"`) | MPLSPath | PathId | TransportLink | NodeId |
+
+> **Gap found during live graph-canvas review**: `MPLSPath` was originally
+> defined as a node with **no edges at all**, leaving it fully disconnected
+> from the rest of the graph even though `FactMPLSPathHops` (loaded as a
+> Delta table) exists specifically to bridge it. That table is
+> **polymorphic** -- each row's `NodeId`/`NodeType` pair points at either a
+> `CoreRouter` or a `TransportLink` row depending on hop position -- so it
+> needs to be split into the two filtered edges above rather than one
+> edge. If the portal's "Add edge" flow doesn't expose a filter step,
+> add both edges without a filter anyway: rows where `NodeId` doesn't match
+> the target node type's key just fail to resolve and are skipped, which is
+> harmless (if less clean) than doing nothing.
 
 Column names above were verified directly against each table's real Delta
 log schema (`_delta_log/00000000000000000000.json` via the OneLake DFS API),
