@@ -71,7 +71,8 @@ from azure.ai.projects.models import MCPToolboxTool
 from azure.identity import AzureDeveloperCliCredential, ManagedIdentityCredential
 from dotenv import load_dotenv
 from mcp import McpError
-from microsoft_agents.hosting.core import Authorization, TurnContext
+from microsoft_agents.activity import Activity
+from microsoft_agents.hosting.core import Authorization, CardFactory, TurnContext
 from microsoft_agents_a365.notifications.agent_notification import NotificationTypes
 
 from agent_interface import AgentInterface
@@ -214,7 +215,47 @@ def _jwt_exp_epoch(token: str, default_ttl_seconds: float = 300.0) -> float:
         return time.time() + default_ttl_seconds
 
 
-_WORK_IQ_CONSENT_PREFIX = "Work IQ needs your consent before it can access this data. Please open: "
+
+def _build_workiq_consent_activity(consent_url: str) -> Activity:
+    """Build a Teams Adaptive Card (with an Action.OpenUrl button) for the Work IQ consent link.
+
+    Consent URLs are long, ugly, single-use, and short-TTL -- rendering them as
+    raw chat text relies on Teams' own auto-linkification (not always reliable
+    for URLs this size/shape) and makes the link hard for a user to actually
+    tap. An Adaptive Card with a dedicated "Sign in" button is the standard
+    Bot Framework/Teams pattern for this and guarantees a tappable action.
+    """
+    card = {
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "body": [
+            {
+                "type": "TextBlock",
+                "text": "🔐 Work IQ needs your consent",
+                "weight": "Bolder",
+                "size": "Medium",
+                "wrap": True,
+            },
+            {
+                "type": "TextBlock",
+                "text": (
+                    "Before I can pull this data from Work IQ, please sign in and grant "
+                    "consent. This link is single-use and expires quickly -- please open "
+                    "it right away."
+                ),
+                "wrap": True,
+            },
+        ],
+        "actions": [
+            {
+                "type": "Action.OpenUrl",
+                "title": "Sign in to Work IQ",
+                "url": consent_url,
+            }
+        ],
+    }
+    return Activity(type="message", attachments=[CardFactory.adaptive_card(card)])
 
 
 def _extract_a2a_consent_url(exc: BaseException) -> Optional[str]:
@@ -558,7 +599,12 @@ class NocAgent(AgentInterface):
         except McpError as exc:
             consent_url = _extract_a2a_consent_url(exc)
             if consent_url:
-                return f"{_WORK_IQ_CONSENT_PREFIX}{consent_url}"
+                # Send the sign-in Adaptive Card directly (context is already
+                # available here) and return an empty string so the caller's
+                # own `send_activity(response)` is a no-op -- avoids sending
+                # both a card AND a redundant plain-text message.
+                await context.send_activity(_build_workiq_consent_activity(consent_url))
+                return ""
             logger.error("❌ MCP tool error: %s", exc, exc_info=True)
             return f"Sorry, one of my tools failed: {exc}"
         except Exception as exc:  # noqa: BLE001

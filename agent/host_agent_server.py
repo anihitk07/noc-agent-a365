@@ -288,7 +288,12 @@ class GenericAgentHost:
                         response = await self.agent_instance.process_user_message(
                             user_message, self.agent_app.auth, self.auth_handler_name, context
                         )
-                        await context.send_activity(response)
+                        # ponytail: process_user_message() may return "" when it has
+                        # already sent its own reply directly via `context` (e.g. the
+                        # Work IQ consent Adaptive Card) -- skip sending an empty
+                        # follow-up activity in that case.
+                        if response:
+                            await context.send_activity(response)
                     finally:
                         if typing_task:
                             typing_task.cancel()
