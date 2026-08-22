@@ -131,7 +131,13 @@ def put_workiq_connection(
             "category": "RemoteTool",
             "target": WORKIQ_TARGET,
             "group": "GenericProtocol",
-            "isSharedToAll": False,
+            # ponytail: this ARM preview API silently ignores isSharedToAll
+            # on both create and update (verified live -- always comes back
+            # false regardless of what's sent); leaving it True here is a
+            # harmless best-effort in case that changes. If per-user sharing
+            # ever actually matters, it must be set from the Foundry portal
+            # UI instead.
+            "isSharedToAll": True,
             "AuthorizationUrl": authorize_url,
             "TokenUrl": token_url,
             "RefreshUrl": token_url,
