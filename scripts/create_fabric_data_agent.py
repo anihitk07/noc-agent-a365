@@ -129,12 +129,19 @@ def wait_for_operation(
 
 
 def list_data_agents(client: httpx.Client, workspace_id: str) -> list[dict]:
-    """List data agents in the configured workspace."""
+    """List data agents in the configured workspace.
+
+    # ponytail: the dedicated `/v1/workspaces/{id}/dataAgents` list endpoint
+    # started 404ing (Fabric API changed/deprecated it) even though the
+    # per-item sub-resource endpoints (staging/*, publish) still work fine.
+    # The generic Items API with a type filter is the stable equivalent.
+    """
     response = request(
         client,
         "GET",
-        f"/v1/workspaces/{workspace_id}/dataAgents",
+        f"/v1/workspaces/{workspace_id}/items",
         expected_statuses={httpx.codes.OK},
+        params={"type": "DataAgent"},
     )
     return response.json().get("value", [])
 
