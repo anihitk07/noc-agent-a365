@@ -1,0 +1,56 @@
+<policies>
+  <inbound>
+    <base />
+    {{JWT_BLOCK}}
+    <set-variable name="consumerId" value="@{
+        var claimValue = context.Subscription?.Name;
+        if (&quot;{{CLIENT_AUTH_MODE}}&quot; == &quot;entra-id&quot;)
+        {
+            var claim = context.Principal?.Claims?.FirstOrDefault(c =&gt; c.Type == &quot;{{ENTRA_TEAM_CLAIM}}&quot;);
+            claimValue = claim?.Value;
+        }
+        return string.IsNullOrEmpty(claimValue) ? &quot;anonymous&quot; : claimValue;
+    }" />
+    <set-variable name="requestBody" value="@(context.Request.Body?.As&lt;string&gt;(preserveContent: true) ?? &quot;{}&quot;)" />
+    <set-variable name="requestDeployment" value="@{
+        var body = (string)context.Variables[&quot;requestBody&quot;];
+        var marker = &quot;\&quot;model\&quot;:&quot;;
+        var index = body.IndexOf(marker, System.StringComparison.OrdinalIgnoreCase);
+        if (index &lt; 0) return &quot;&quot;;
+        var start = body.IndexOf('&quot;', index + marker.Length);
+        if (start &lt; 0) return &quot;&quot;;
+        start += 1;
+        var end = body.IndexOf('&quot;', start);
+        return end &lt; 0 ? &quot;&quot; : body.Substring(start, end - start);
+    }" />
+    <set-variable name="allowedList" value="{{ALLOWED_MODELS_JSON}}" />
+    <choose>
+      <when condition="@(!((string)context.Variables[&quot;allowedList&quot;]).Contains((string)context.Variables[&quot;requestDeployment&quot;]))">
+        <return-response>
+          <set-status code="403" reason="Forbidden" />
+          <set-body>{&quot;error&quot;:{&quot;message&quot;:&quot;Requested model is not allowed for this gateway.&quot;}}</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+    <set-backend-service base-url="{{FOUNDRY_BASE_URL}}" />
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+    <set-header name="x-gateway-backend" exists-action="override">
+      <value>foundry</value>
+    </set-header>
+  </outbound>
+  <on-error>
+    <base />
+    <choose>
+      <when condition="@(context.Response != null &amp;&amp; (context.Response.StatusCode == 429 || context.Response.StatusCode &gt;= 500))">
+        <rewrite-uri template="/deployments/@((string)context.Variables[&quot;requestDeployment&quot;])/responses?api-version={{OPENAI_API_VERSION}}" copy-unmatched-params="false" />
+        <set-backend-service base-url="{{OPENAI_BASE_URL}}" />
+      </when>
+    </choose>
+  </on-error>
+</policies>

@@ -1,0 +1,88 @@
+<policies>
+  <inbound>
+    <base />
+    {{JWT_BLOCK}}
+    <set-variable name="consumerId" value="@{
+        var claimValue = context.Subscription?.Name;
+        if (&quot;{{CLIENT_AUTH_MODE}}&quot; == &quot;entra-id&quot;)
+        {
+            var claim = context.Principal?.Claims?.FirstOrDefault(c =&gt; c.Type == &quot;{{ENTRA_TEAM_CLAIM}}&quot;);
+            claimValue = claim?.Value;
+        }
+        return string.IsNullOrEmpty(claimValue) ? &quot;anonymous&quot; : claimValue;
+    }" />
+    <set-variable name="requestDeployment" value="@{
+        var path = context.Request.OriginalUrl.Path;
+        var marker = &quot;/deployments/&quot;;
+        var start = path.IndexOf(marker, System.StringComparison.OrdinalIgnoreCase);
+        if (start &lt; 0) return &quot;&quot;;
+        start += marker.Length;
+        var end = path.IndexOf('/', start);
+        return end &lt; 0 ? path.Substring(start) : path.Substring(start, end - start);
+    }" />
+    <set-variable name="consumerConfigJson" value="@{
+        var encoded = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;consumer-config-json&quot;, &quot;e30=&quot;);
+        try
+        {
+            return System.Text.Encoding.UTF8.GetString(System.Convert.FromBase64String(encoded));
+        }
+        catch
+        {
+            return &quot;{}&quot;;
+        }
+    }" />
+    <set-variable name="allowedList" value="{{ALLOWED_MODELS_JSON}}" />
+    <choose>
+      <when condition="@(!((string)context.Variables[&quot;allowedList&quot;]).Contains((string)context.Variables[&quot;requestDeployment&quot;]))">
+        <return-response>
+          <set-status code="403" reason="Forbidden" />
+          <set-body>{&quot;error&quot;:{&quot;message&quot;:&quot;Requested model is not allowed for this gateway.&quot;}}</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <set-variable name="tierKey" value="@{
+        var body = (string)context.Variables[&quot;consumerConfigJson&quot;];
+        var consumer = (string)context.Variables[&quot;consumerId&quot;];
+        var probe = string.Concat(&quot;\&quot;&quot;, consumer, &quot;\&quot;:{\&quot;tier\&quot;:\&quot;&quot;);
+        var index = body.IndexOf(probe, System.StringComparison.OrdinalIgnoreCase);
+        if (index &lt; 0) return &quot;&quot;;
+        var start = index + probe.Length;
+        var end = body.IndexOf('&quot;', start);
+        return end &lt; 0 ? &quot;&quot; : body.Substring(start, end - start);
+    }" />
+    <set-variable name="tierTpm" value="@{
+        var tier = (string)context.Variables[&quot;tierKey&quot;];
+        return string.IsNullOrEmpty(tier) ? &quot;{{DEFAULT_TPM}}&quot; : context.Variables.GetValueOrDefault&lt;string&gt;($&quot;tier-{tier}-tpm&quot;, &quot;{{DEFAULT_TPM}}&quot;);
+    }" />
+    <set-variable name="tierQuota" value="@{
+        var tier = (string)context.Variables[&quot;tierKey&quot;];
+        return string.IsNullOrEmpty(tier) ? &quot;{{DEFAULT_QUOTA}}&quot; : context.Variables.GetValueOrDefault&lt;string&gt;($&quot;tier-{tier}-quota&quot;, &quot;{{DEFAULT_QUOTA}}&quot;);
+    }" />
+    <set-variable name="tierQuotaPeriod" value="@{
+        var tier = (string)context.Variables[&quot;tierKey&quot;];
+        return string.IsNullOrEmpty(tier) ? &quot;{{DEFAULT_QUOTA_PERIOD}}&quot; : context.Variables.GetValueOrDefault&lt;string&gt;($&quot;tier-{tier}-period&quot;, &quot;{{DEFAULT_QUOTA_PERIOD}}&quot;);
+    }" />
+    <azure-openai-token-limit counter-key="@(context.Variables[&quot;consumerId&quot;])" tokens-per-minute="@(int.Parse((string)context.Variables[&quot;tierTpm&quot;]))" estimate-prompt-tokens="true" />
+    <quota-by-key calls="@(int.Parse((string)context.Variables[&quot;tierQuota&quot;]))" renewal-period="86400" counter-key="@(context.Variables[&quot;consumerId&quot;])" />
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+    <set-backend-service base-url="{{OPENAI_BASE_URL}}" />
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+    <set-header name="x-gateway-backend" exists-action="override">
+      <value>openai</value>
+    </set-header>
+  </outbound>
+  <on-error>
+    <base />
+    <choose>
+      <when condition="@(context.Response != null &amp;&amp; (context.Response.StatusCode == 429 || context.Response.StatusCode &gt;= 500))">
+        <rewrite-uri template="/openai/v1/responses?api-version={{OPENAI_API_VERSION}}" copy-unmatched-params="false" />
+        <set-backend-service base-url="{{FOUNDRY_BASE_URL}}" />
+      </when>
+    </choose>
+  </on-error>
+</policies>
