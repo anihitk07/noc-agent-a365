@@ -20,6 +20,13 @@ param principalId string
 @description('Principal type of the identity running azd.')
 param principalType string
 
+@description('Object ID of the group/user granting Teams users OAuth identity-passthrough access to noc-topology-agent/noc-comms-agent (Foundry Agent Consumer role at project scope). Leave empty to skip -- see docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md.')
+param teamsUsersPrincipalId string = ''
+
+@description('Principal type of teamsUsersPrincipalId.')
+param teamsUsersPrincipalType string = 'Group'
+
+
 @description('Model deployments serialized by the azure.ai.agents azd extension.')
 param aiProjectDeploymentsJson string = '[]'
 
@@ -189,6 +196,8 @@ module agentHostRbac 'core/ai/rbac.bicep' = {
     aiProjectName: aiProject.outputs.projectName
     principalId: agentHost.outputs.principalId
     searchServiceName: aiProject.outputs.search.serviceName
+    teamsUsersPrincipalId: teamsUsersPrincipalId
+    teamsUsersPrincipalType: teamsUsersPrincipalType
   }
 }
 
