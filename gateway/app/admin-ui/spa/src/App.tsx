@@ -13,6 +13,7 @@ import Models from "./pages/Models";
 import Budget from "./pages/Budget";
 import RateLimits from "./pages/RateLimits";
 import Monitoring from "./pages/Monitoring";
+import Runs from "./pages/Runs";
 
 export default function App({ config }: { config: RuntimeConfig }) {
   const { instance } = useMsal();
@@ -30,6 +31,7 @@ export default function App({ config }: { config: RuntimeConfig }) {
           <Routes>
             <Route path="/" element={<Navigate to="/consumers" replace />} />
             <Route path="/dashboard" element={<Dashboard config={config} />} />
+            <Route path="/runs" element={<Runs config={config} />} />
             <Route path="/consumers" element={<Consumers config={config} />} />
             <Route path="/models" element={<Models config={config} />} />
             <Route path="/budget" element={<Budget config={config} />} />

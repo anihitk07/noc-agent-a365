@@ -18,6 +18,7 @@ from bff.deps import build_verifier, get_verifier
 from bff.jobs import JobStarter
 from bff.metrics import MetricsQuery
 from bff.models_pricing import PricingStore
+from bff.runs import RunsQuery
 from bff.store import MappingStore
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -47,6 +48,7 @@ def build_app():
     model_prices = _read_model_prices(pricing)
 
     metrics = MetricsQuery(LogsQueryClient(cred), settings.log_analytics_workspace_id)
+    runs = RunsQuery(LogsQueryClient(cred), settings.log_analytics_workspace_id, model_prices)
     job_starter = JobStarter(cred, httpx.Client(), sub=settings.subscription_id, rg=settings.apim_rg, job=settings.config_sync_job_name)
 
     deps = AppDeps(
@@ -60,6 +62,7 @@ def build_app():
         pricing=pricing,
         model_prices=model_prices,
         job_starter=job_starter,
+        runs=runs,
     )
     app = app_factory(deps)
     verifier = build_verifier(settings)

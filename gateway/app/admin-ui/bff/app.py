@@ -34,6 +34,7 @@ from bff.cost import cost_usd
 from bff.deps import current_principal, require_admin
 from bff.metrics import MetricsQuery, RANGES
 from bff.models_pricing import PricingStore, apply_overrides, default_region, preview_refresh, save_doc
+from bff.runs import RunsQuery
 from bff.store import MappingStore
 
 
@@ -76,6 +77,7 @@ class AppDeps:
     pricing: PricingStore
     model_prices: dict = field(default_factory=dict)
     job_starter: object = None
+    runs: RunsQuery | None = None
 
 
 class CreateKeyRequest(BaseModel):
@@ -285,6 +287,12 @@ def app_factory(deps: AppDeps) -> FastAPI:
     @app.get("/api/metrics/monitoring")
     def metrics_monitoring(range: str = "1h", _: Principal = Depends(require_admin)):
         return deps.metrics.monitoring(_resolve_range(range))
+
+    @app.get("/api/runs")
+    def list_runs(range: str = "24h", _: Principal = Depends(require_admin)):
+        if deps.runs is None:
+            return {"items": []}
+        return deps.runs.list(_resolve_range(range)).model_dump()
 
     @app.get("/api/pricing")
     def get_pricing(_: Principal = Depends(require_admin)):

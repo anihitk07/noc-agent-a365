@@ -11,6 +11,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     group: "Monitor",
     items: [
       { to: "/dashboard", label: "Dashboard", icon: <DataPieRegular /> },
+      { to: "/runs", label: "Runs", icon: <DocumentBulletListRegular /> },
       { to: "/monitoring", label: "Logs", icon: <DocumentBulletListRegular /> },
     ],
   },

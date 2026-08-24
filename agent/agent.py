@@ -56,13 +56,15 @@ docs/TROUBLESHOOTING.md's "Foundry project RBAC" entry.)
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
 import re
 import time
-from typing import Optional
+from typing import Callable, Optional
 
+import httpx
 from agent_framework import Agent, MCPStreamableHTTPTool, Message
 from agent_framework.exceptions import ToolException
 from agent_framework.foundry import FoundryChatClient
@@ -117,6 +119,7 @@ WORK_IQ_CONNECTION_NAME = os.getenv("WORK_IQ_CONNECTION_NAME", "WorkIQ")
 # docstring) so the MAF Agent only has to manage a single client-side MCP
 # tool, rather than 4 raw MCP client connections.
 NOC_TOOLBOX_NAME = os.getenv("NOC_TOOLBOX_NAME", "noc-iq-toolbox")
+RUN_LEDGER_AGENT_NAME = "noc-agent"
 
 # OBO token scope used to authenticate the WHOLE per-turn Foundry chat client
 # as the calling Teams user (not just one tool call). Fabric IQ/Work IQ's
@@ -213,6 +216,113 @@ def _jwt_exp_epoch(token: str, default_ttl_seconds: float = 300.0) -> float:
         return float(json.loads(base64.urlsafe_b64decode(payload_b64))["exp"])
     except Exception:  # noqa: BLE001
         return time.time() + default_ttl_seconds
+
+
+def _run_ledger_base_url() -> str:
+    return os.getenv("RUN_LEDGER_BASE_URL", "").strip().rstrip("/")
+
+
+def _run_ledger_timeout_seconds() -> float:
+    try:
+        return float(os.getenv("RUN_LEDGER_CREATE_TIMEOUT_SECONDS", "2.0"))
+    except ValueError:
+        return 2.0
+
+
+def _run_ledger_budget_micros() -> int:
+    try:
+        return max(1, int(os.getenv("RUN_LEDGER_BUDGET_MICROS", "2000000")))
+    except ValueError:
+        return 2_000_000
+
+
+def _run_ledger_policy_set() -> str:
+    return os.getenv("RUN_LEDGER_POLICY_SET", "default").strip() or "default"
+
+
+def _build_run_headers(run_token: Optional[str], step: Optional[str]) -> dict[str, str]:
+    if not run_token or not step:
+        return {}
+    return {
+        "x-run-token": run_token,
+        "x-agent": RUN_LEDGER_AGENT_NAME,
+        "x-step": step,
+    }
+
+
+def _normalize_headers(headers) -> dict[str, str]:
+    if headers is None:
+        return {}
+    try:
+        return {str(k).lower(): str(v) for k, v in headers.items()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _extract_http_error_details(exc: BaseException) -> tuple[int, dict[str, str]] | None:
+    queue = [exc]
+    seen: set[int] = set()
+    while queue:
+        current = queue.pop(0)
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        if response is not None and getattr(response, "status_code", None) is not None:
+            return int(response.status_code), _normalize_headers(getattr(response, "headers", None))
+        status_code = getattr(current, "status_code", None)
+        headers = getattr(current, "headers", None)
+        if status_code is not None and headers is not None:
+            return int(status_code), _normalize_headers(headers)
+        queue.extend(arg for arg in getattr(current, "args", ()) if isinstance(arg, BaseException))
+        queue.extend(
+            nested
+            for nested in (getattr(current, "__cause__", None), getattr(current, "__context__", None))
+            if isinstance(nested, BaseException)
+        )
+    return None
+
+
+def _extract_run_halt_reason(exc: BaseException) -> Optional[str]:
+    details = _extract_http_error_details(exc)
+    if details is None:
+        return None
+    status_code, headers = details
+    if status_code == 403 and headers.get("x-run-halt-reason"):
+        return headers["x-run-halt-reason"]
+    if status_code == 429 and headers.get("retry-after"):
+        return f"Concurrency cap reached. Retry after {headers['retry-after']} second(s)."
+    return None
+
+
+def _build_run_halt_activity(halt_reason: str) -> Activity:
+    card = {
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "body": [
+            {
+                "type": "TextBlock",
+                "text": "⏸️ Run paused by policy",
+                "weight": "Bolder",
+                "size": "Medium",
+                "wrap": True,
+            },
+            {
+                "type": "TextBlock",
+                "text": (
+                    "This request hit a TokenOps policy at the gateway, so I stopped before "
+                    "sending more model or tool calls."
+                ),
+                "wrap": True,
+            },
+            {
+                "type": "FactSet",
+                "facts": [{"title": "Reason", "value": halt_reason}],
+            },
+        ],
+    }
+    return Activity(type="message", attachments=[CardFactory.adaptive_card(card)])
 
 
 
@@ -365,6 +475,7 @@ class NocAgent(AgentInterface):
         # of event-loop-blocking work sitting immediately before the MCP
         # connect (a suspect in the "cancel scope" crash investigation).
         self._token_cache: dict[tuple[str, str], tuple[str, float]] = {}
+        self._run_token_cache: dict[tuple[str, str], str] = {}
 
     # -------------------------------------------------------------------
     # LIFECYCLE
@@ -464,7 +575,46 @@ class NocAgent(AgentInterface):
     # PER-TURN TOOL -- one Toolbox MCP tool bundling all 4 IQ surfaces
     # -------------------------------------------------------------------
 
-    def _build_turn_tool(self, foundry_user_token: Optional[str]) -> Optional[MCPStreamableHTTPTool]:
+    def _get_or_create_run_id(self, conversation_id: str, activity_id: str) -> str:
+        seed = f"{conversation_id}\n{activity_id}".encode("utf-8")
+        return "teams-" + hashlib.sha256(seed).hexdigest()[:24]
+
+    async def _get_or_create_run_token(self, conversation_id: str, activity_id: str) -> Optional[str]:
+        base_url = _run_ledger_base_url()
+        if not base_url:
+            return None
+
+        cache_key = (conversation_id, activity_id)
+        cached = self._run_token_cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            async with httpx.AsyncClient(timeout=_run_ledger_timeout_seconds()) as client:
+                response = await client.post(
+                    f"{base_url}/v1/runs",
+                    json={
+                        "run_id": self._get_or_create_run_id(conversation_id, activity_id),
+                        "budget_micros": _run_ledger_budget_micros(),
+                        "policy_set": _run_ledger_policy_set(),
+                    },
+                )
+                response.raise_for_status()
+            run_token = response.json().get("run_token")
+            if isinstance(run_token, str) and run_token:
+                self._run_token_cache[cache_key] = run_token
+                return run_token
+            logger.warning("⚠️ Run ledger returned no run_token for %s", cache_key)
+        except Exception as exc:  # noqa: BLE001 -- best-effort only, never break the turn
+            logger.warning("⚠️ Run ledger unavailable, continuing without run headers: %s", exc)
+        return None
+
+    def _build_turn_tool(
+        self,
+        foundry_user_token: Optional[str],
+        run_token: Optional[str],
+        next_step: Callable[[], str],
+    ) -> Optional[MCPStreamableHTTPTool]:
         """Build the single Toolbox MCP tool for this turn.
 
         Authenticates the outer HTTP call to the toolbox MCP endpoint as the
@@ -486,8 +636,9 @@ class NocAgent(AgentInterface):
         bearer_token = foundry_user_token or self._service_credential.get_token(FOUNDRY_USER_TOKEN_SCOPES).token
 
         def _header_provider(_kwargs: dict) -> dict[str, str]:
-            auth_scheme = "Bearer"
-            return {"Authorization": auth_scheme + " " + bearer_token}
+            headers = {"Authorization": "Bearer " + bearer_token}
+            headers.update(_build_run_headers(run_token, next_step()))
+            return headers
 
         return MCPStreamableHTTPTool(
             name="noc-iq-toolbox",
@@ -519,6 +670,32 @@ class NocAgent(AgentInterface):
         )
         history: list[Message] = self._conversations.get(user_id, [])
         history.append(Message("user", [message]))
+        conversation = getattr(context.activity, "conversation", None)
+        conversation_id = getattr(conversation, "id", "") or user_id
+        activity_id = getattr(context.activity, "id", "") or str(len(history))
+        run_token = await self._get_or_create_run_token(conversation_id, activity_id)
+        step_counter = {"value": 0}
+
+        def _next_step() -> str:
+            step_counter["value"] += 1
+            return str(step_counter["value"])
+
+        turn_agent = self._agent
+        if run_token:
+            # ponytail: run headers are needed only when the gateway wiring is configured, so keep
+            # the long-lived shared client for the default/no-ledger path and scope this extra
+            # per-turn client construction to the opt-in run-governed path only.
+            turn_agent = Agent(
+                client=FoundryChatClient(
+                    project_endpoint=PROJECT_ENDPOINT,
+                    model=MODEL_DEPLOYMENT_NAME,
+                    credential=self._service_credential,
+                    default_headers=_build_run_headers(run_token, _next_step()),
+                ),
+                name="NocAgent",
+                instructions=NOC_AGENT_INSTRUCTIONS,
+                default_options={"store": False},
+            )
 
         async def _run_turn() -> "AgentResponse":
             # ponytail: self._agent is a long-lived singleton (see initialize()),
@@ -554,13 +731,13 @@ class NocAgent(AgentInterface):
             # before giving up.
             last_exc: Optional[BaseException] = None
             for attempt in range(1, MCP_CONNECT_MAX_ATTEMPTS + 1):
-                tool = self._build_turn_tool(foundry_user_token)
+                tool = self._build_turn_tool(foundry_user_token, run_token, _next_step)
                 turn_tools = [tool] if tool else []
                 try:
                     if tool is not None:
                         async with tool:
-                            return await self._agent.run(history, tools=turn_tools)
-                    return await self._agent.run(history, tools=turn_tools)
+                            return await turn_agent.run(history, tools=turn_tools)
+                    return await turn_agent.run(history, tools=turn_tools)
                 except ToolException as exc:
                     last_exc = exc
                     if "cancel scope" not in str(exc).lower() or attempt == MCP_CONNECT_MAX_ATTEMPTS:
@@ -596,7 +773,22 @@ class NocAgent(AgentInterface):
                 "Sorry, that request is taking longer than expected. "
                 "Please try again -- one of my tools may be slow to respond."
             )
+        except ToolException as exc:
+            halt_reason = _extract_run_halt_reason(exc)
+            if halt_reason:
+                await context.send_activity(_build_run_halt_activity(halt_reason))
+                return ""
+            consent_url = _extract_a2a_consent_url(exc)
+            if consent_url:
+                await context.send_activity(_build_workiq_consent_activity(consent_url))
+                return ""
+            logger.error("❌ MCP tool error: %s", exc, exc_info=True)
+            return f"Sorry, one of my tools failed: {exc}"
         except McpError as exc:
+            halt_reason = _extract_run_halt_reason(exc)
+            if halt_reason:
+                await context.send_activity(_build_run_halt_activity(halt_reason))
+                return ""
             consent_url = _extract_a2a_consent_url(exc)
             if consent_url:
                 # Send the sign-in Adaptive Card directly (context is already
@@ -608,6 +800,10 @@ class NocAgent(AgentInterface):
             logger.error("❌ MCP tool error: %s", exc, exc_info=True)
             return f"Sorry, one of my tools failed: {exc}"
         except Exception as exc:  # noqa: BLE001
+            halt_reason = _extract_run_halt_reason(exc)
+            if halt_reason:
+                await context.send_activity(_build_run_halt_activity(halt_reason))
+                return ""
             logger.error("❌ Error processing message: %s", exc, exc_info=True)
             self._conversations.pop(user_id, None)
             return f"Sorry, I encountered an error: {exc}"
