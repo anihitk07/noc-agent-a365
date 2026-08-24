@@ -276,6 +276,7 @@ module network 'core/network/vnet.bicep' = {
     location: location
     tags: tags
     nameSuffix: nameSuffix
+    apimDelegationService: (split(apimSkuName, '_')[0] == 'StandardV2' || split(apimSkuName, '_')[0] == 'BasicV2') ? 'Microsoft.Web/serverFarms' : 'Microsoft.Web/hostingEnvironments'
   }
 }
 

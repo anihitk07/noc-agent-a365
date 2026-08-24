@@ -15,6 +15,9 @@ param vnetCidr string = '10.40.0.0/16'
 @description('CIDR for the APIM subnet.')
 param apimSubnetCidr string = '10.40.1.0/24'
 
+@description('Subnet delegation service for the APIM subnet. Microsoft.Web/hostingEnvironments for PremiumV2 full injection; Microsoft.Web/serverFarms for StandardV2/BasicV2 outbound-only integration.')
+param apimDelegationService string = 'Microsoft.Web/hostingEnvironments'
+
 @description('CIDR for the private endpoint subnet.')
 param privateEndpointSubnetCidr string = '10.40.2.0/24'
 
@@ -129,9 +132,9 @@ resource apimSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' = {
     }
     delegations: [
       {
-        name: 'apim-premiumv2-delegation'
+        name: 'apim-v2-delegation'
         properties: {
-          serviceName: 'Microsoft.Web/hostingEnvironments'
+          serviceName: apimDelegationService
         }
       }
     ]

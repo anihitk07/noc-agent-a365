@@ -185,8 +185,8 @@ resource apim 'Microsoft.ApiManagement/service@2024-05-01' = {
   properties: {
     publisherName: publisherName
     publisherEmail: publisherEmail
-    // ponytail: PremiumV2 injection is the private-only path; use v2 integration instead if you need public inbound.
-    virtualNetworkType: 'Internal'
+    // ponytail: PremiumV2/classic Internal = full injection (private in+out). StandardV2/BasicV2 External = outbound-only integration (public inbound).
+    virtualNetworkType: (skuBaseName == 'StandardV2' || skuBaseName == 'BasicV2') ? 'External' : 'Internal'
     virtualNetworkConfiguration: {
       subnetResourceId: apimSubnetId
     }
