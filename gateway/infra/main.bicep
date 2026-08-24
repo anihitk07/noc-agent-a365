@@ -244,7 +244,7 @@ var locationShort = regionShortMap[?location] ?? take(replace(location, ' ', '')
 var nameSuffix = '${prefix}-${env}-${locationShort}'
 var resourceToken = uniqueString(subscription().id, resourceGroupName, location)
 var apimResourceName = toLower(take('apim${replace(nameSuffix, '-', '')}${resourceToken}', 50))
-var apimResourceId = resourceId(resourceGroupName, 'Microsoft.ApiManagement/service', apimResourceName)
+var apimResourceId = resourceId(subscription().subscriptionId, resourceGroupName, 'Microsoft.ApiManagement/service', apimResourceName)
 var openAiAliasNames = [for deployment in openaiDeployments: deployment.name]
 var foundryAliasNames = [for deployment in foundryDeployments: deployment.name]
 var aliasModelsJson = string({
@@ -462,7 +462,7 @@ module containerApps 'core/host/container-apps.bicep' = {
     infrastructureSubnetId: network.outputs.containerAppsSubnetId
     logAnalyticsWorkspaceId: observability.outputs.logAnalyticsWorkspaceId
     logAnalyticsCustomerId: observability.outputs.logAnalyticsWorkspaceCustomerId
-    logAnalyticsSharedKey: listKeys(resourceId(resourceGroupName, 'Microsoft.OperationalInsights/workspaces', 'law-${nameSuffix}'), '2023-09-01').primarySharedKey
+    logAnalyticsSharedKey: listKeys(resourceId(subscription().subscriptionId, resourceGroupName, 'Microsoft.OperationalInsights/workspaces', 'law-${nameSuffix}'), '2023-09-01').primarySharedKey
     acrId: registry.outputs.registryId
     acrLoginServer: registry.outputs.loginServer
     apimId: apimResourceId
