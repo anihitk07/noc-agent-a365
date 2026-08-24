@@ -90,6 +90,12 @@ resource privateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
       }
     ]
   }
+  // ponytail: without this, the PE PUT races the serialized model-deployment loop's
+  // own PUTs onto the same account, which flips the account's provisioningState to
+  // 'Accepted' mid-loop and fails the PE with AccountProvisioningStateInvalid.
+  dependsOn: [
+    deploymentResources
+  ]
 }
 
 resource privateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
