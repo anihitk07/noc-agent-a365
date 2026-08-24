@@ -1,0 +1,7 @@
+**/node_modules
+**/__pycache__
+**/.venv
+admin-ui/bff/static
+admin-ui/bff/tests
+admin-ui/spa/dist
+.git
