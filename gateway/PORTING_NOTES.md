@@ -46,3 +46,47 @@ Ported from `C:\Flutter\apim-foundry-governance` into `gateway/infra` as a stand
 - app code port for the config-sync worker image
 - app code port for the admin UI / BFF image
 - deploy-time review, secrets/bootstrap, and live Azure validation
+
+## Layer 2 follow-up wiring: run-ledger
+
+### APIM policy splice points
+
+- New fragment file: `gateway\infra\policies\run-ledger-fragment.xml`
+- `gateway\infra\policies\openai-pipeline.xml`
+  - `<inbound>`: insert the fragment's inbound block immediately after `<base />` and before the existing `consumerId` block.
+  - `<outbound>`: insert the fragment's outbound `send-one-way-request` block immediately after `<base />` and before the existing `x-gateway-backend` header block.
+  - `<on-error>`: insert the fragment's on-error `send-one-way-request` block immediately after `<base />` and before the existing downgrade `<choose>` block.
+- `gateway\infra\policies\foundry-pipeline.xml`
+  - `<inbound>`: insert the fragment's inbound block immediately after `<base />` and before the existing `consumerId` block.
+  - `<outbound>`: insert the fragment's outbound `send-one-way-request` block immediately after `<base />` and before the existing `x-gateway-backend` header block.
+  - `<on-error>`: insert the fragment's on-error `send-one-way-request` block immediately after `<base />` and before the existing downgrade `<choose>` block.
+
+### APIM placeholder rendering still to wire
+
+`gateway\infra\core\apim\apim.bicep` is intentionally untouched in this step. A follow-up integration should:
+
+- `loadTextContent('../../policies/run-ledger-fragment.xml')`
+- replace these placeholders the same way the current OpenAI / Foundry policy templates are rendered:
+  - `{{RUN_LEDGER_BASE_URL}}`
+  - `{{RUN_TOKEN_SIGNING_KEY_NAMED_VALUE}}`
+  - `{{RUN_TOKEN_QUOTA}}`
+  - `{{RUN_TOKEN_QUOTA_PERIOD}}`
+  - `{{RUN_TOKENS_PER_MINUTE}}`
+
+### Container Apps wiring still to do
+
+- New hosting module: `gateway\infra\core\host\run-ledger.bicep`
+- `gateway\infra\main.bicep` is intentionally untouched in this step. Add a `module runLedger 'core/host/run-ledger.bicep' = { ... }` block only after the sibling APIM / SKU work settles, passing:
+  - the existing Container Apps environment id
+  - ACR id + login server
+  - the chosen run-ledger user-assigned identity id / principal id / client id
+  - `keyVaultUrl`
+  - `runTokenSigningSecretName`
+  - `redisHostName`
+  - `modelPricesJson`
+
+### Deferred infra on purpose
+
+- **Redis provisioning is not included here.** The new module only takes `redisHostName` and env-var wires it. Next step: provision Azure Managed Redis (`Microsoft.Cache/redisEnterprise` or `Microsoft.Cache/redis` with Microsoft Entra auth enabled), then pass its hostname into `run-ledger.bicep`.
+- **Key Vault + Redis RBAC for the run-ledger identity is not wired here.** Before deployment, grant the chosen user-assigned identity read access to the signing secret in Key Vault and data-plane access to Redis.
+- **Model price source is env-driven for now.** The service expects `MODEL_PRICES_JSON` in the same `{model: {prompt, completion}}` shape the Admin UI already reads from Cosmos pricing; wiring the ledger directly to the existing pricing doc is a small follow-up once the hosting path is stable.
