@@ -104,7 +104,7 @@ var skuBaseName = length(skuParts) > 1 ? skuParts[0] : skuName
 var skuCapacity = length(skuParts) > 1 ? int(skuParts[1]) : 1
 var openaiPolicyTemplate = loadTextContent('../../policies/openai-pipeline.xml')
 var foundryPolicyTemplate = loadTextContent('../../policies/foundry-pipeline.xml')
-var jwtBlock = clientAuthMode == 'entra-id' ? '<validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized"><openid-config url="${environment().authentication.loginEndpoint}${entraTenantId}/v2.0/.well-known/openid-configuration" /><audiences><audience>${entraApiAudience}</audience></audiences><require-scheme>Bearer</require-scheme></validate-jwt>' : ''
+var jwtBlock = clientAuthMode == 'entra-id' ? '<validate-jwt header-name="Authorization" output-token-variable-name="entraJwt" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized"><openid-config url="${environment().authentication.loginEndpoint}${entraTenantId}/v2.0/.well-known/openid-configuration" /><audiences><audience>${entraApiAudience}</audience></audiences><require-scheme>Bearer</require-scheme></validate-jwt>' : ''
 var allowedModelsJson = string(allowedModels)
 // ponytail: allowedModelsJson is substituted into an XML attribute (value="...") in the
 // policy templates below; its own double quotes must be XML-entity-escaped or they
