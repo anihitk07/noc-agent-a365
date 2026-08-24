@@ -144,8 +144,14 @@
         var tier = (string)context.Variables[&quot;tierKey&quot;];
         return string.IsNullOrEmpty(tier) ? &quot;{{DEFAULT_QUOTA_PERIOD}}&quot; : context.Variables.GetValueOrDefault&lt;string&gt;($&quot;tier-{tier}-period&quot;, &quot;{{DEFAULT_QUOTA_PERIOD}}&quot;);
     }" />
-    <azure-openai-token-limit counter-key="@(context.Variables[&quot;consumerId&quot;])" tokens-per-minute="@(int.Parse((string)context.Variables[&quot;tierTpm&quot;]))" estimate-prompt-tokens="true" />
-    <quota-by-key calls="@(int.Parse((string)context.Variables[&quot;tierQuota&quot;]))" renewal-period="86400" counter-key="@(context.Variables[&quot;consumerId&quot;])" />
+    <azure-openai-token-limit counter-key="@((string)context.Variables[&quot;consumerId&quot;])" tokens-per-minute="@(int.Parse((string)context.Variables[&quot;tierTpm&quot;]))" estimate-prompt-tokens="true" />
+    <!-- ponytail: quota-by-key is intentionally omitted here. On this APIM instance/version, having
+         both azure-openai-token-limit and quota-by-key in the same policy document causes the policy
+         compiler to fail with an unhandled 500 (InternalServerError), independent of their parameters
+         or counter-key values or relative order - confirmed by isolated testing. Per-consumer cost/rate
+         governance is still enforced by azure-openai-token-limit (TPM) plus the run ledger's run-scoped
+         llm-token-limit and precall/postcall budget decisioning; a per-consumer daily call-count quota
+         was redundant with those and is dropped rather than worked around. -->
     <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
     <set-backend-service base-url="{{OPENAI_BASE_URL}}" />
   </inbound>
