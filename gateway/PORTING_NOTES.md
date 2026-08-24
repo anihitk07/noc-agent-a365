@@ -14,6 +14,7 @@ Ported from `C:\Flutter\apim-foundry-governance` into `gateway/infra` as a stand
 - Terraform `map(object(...))` inputs became Bicep arrays-of-objects where that keeps loops and parameter files simpler.
 - Terraform `templatefile()` policy rendering became `loadTextContent()` + `replace()` in `core/apim/apim.bicep` because Bicep has no native text template engine.
 - Terraform `count` / `for_each` became Bicep `if (...)` and resource loops.
+- APIM now defaults to **PremiumV2** instead of classic Developer. The Premium v2 Learn guidance says virtual network injection is available in the Premium v2 tier, uses API version `2024-05-01` or later, and provisions in minutes instead of the classic 45-70 minute VNet-injected Developer/Premium path. This keeps the gateway on the private-injection path the user asked for without the classic-tier wait.
 - The jumpbox module was intentionally **not** ported. Cosmos seed data should be written later with either:
   - a one-off `az cosmosdb sql` CLI call, or
   - a one-off Container Apps Job run using the worker image.
@@ -25,6 +26,11 @@ Ported from `C:\Flutter\apim-foundry-governance` into `gateway/infra` as a stand
 - `az bicep build` validates syntax and type-shape, not live regional capability. APIM VNet injection, Foundry model availability, and Container Apps environment behavior still need a deployment-time review.
 - APIM runtime-owned named values (`allowed-models`, quotas, consumer bundle) are seeded here only with safe defaults. The app-layer config-sync worker will own updates later.
 - The broad built-in roles from Terraform were preserved with the same rationale comments. Custom least-privilege roles are still a hardening follow-up, not part of Layer 1.
+
+## APIM PremiumV2 networking note
+
+- PremiumV2 VNet injection requires a **delegated** APIM subnet (`Microsoft.Web/hostingEnvironments`), a minimum **/27** subnet size (this stack already uses **/24**), and NSG outbound **443** rules to the `Storage` and `AzureKeyVault` service tags.
+- The PremiumV2 Learn docs describe injection as the **private inbound + private outbound** path. If a future environment needs public inbound access again, use v2 **integration** instead of trying to recreate the old classic External/Developer behavior.
 
 ## How to deploy later
 

@@ -12,7 +12,7 @@ param nameSuffix string
 @description('Unique token used where Azure requires globally-unique names.')
 param resourceToken string
 
-@description('APIM SKU in Name_Capacity format, for example Developer_1 or Premium_1.')
+@description('APIM SKU name. Supports v2 names such as PremiumV2 and legacy classic Name_Capacity values such as Developer_1.')
 param skuName string
 
 @description('Publisher display name.')
@@ -21,14 +21,8 @@ param publisherName string
 @description('Publisher contact email.')
 param publisherEmail string
 
-@description('Subnet for APIM classic VNet injection.')
+@description('Subnet for APIM PremiumV2 VNet injection.')
 param apimSubnetId string
-
-@description('Public IP used by APIM external VNet mode and management plane plumbing.')
-param publicIpId string
-
-@description('Expose APIM publicly. False keeps APIM internal-only.')
-param apimPublic bool = false
 
 @description('Azure OpenAI account resource ID.')
 param openaiAccountId string
@@ -87,6 +81,8 @@ param entraTeamClaim string
 
 var apimName = toLower(take('apim${replace(nameSuffix, '-', '')}${resourceToken}', 50))
 var skuParts = split(skuName, '_')
+var skuBaseName = length(skuParts) > 1 ? skuParts[0] : skuName
+var skuCapacity = length(skuParts) > 1 ? int(skuParts[1]) : 1
 var openaiPolicyTemplate = loadTextContent('../../policies/openai-pipeline.xml')
 var foundryPolicyTemplate = loadTextContent('../../policies/foundry-pipeline.xml')
 var jwtBlock = clientAuthMode == 'entra-id' ? '<validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized"><openid-config url="${environment().authentication.loginEndpoint}${entraTenantId}/v2.0/.well-known/openid-configuration" /><audiences><audience>${entraApiAudience}</audience></audiences><require-scheme>Bearer</require-scheme></validate-jwt>' : ''
@@ -142,13 +138,13 @@ resource foundryAccount 'Microsoft.CognitiveServices/accounts@2025-06-01' existi
   name: last(split(foundryAccountId, '/'))
 }
 
-resource apim 'Microsoft.ApiManagement/service@2024-10-01-preview' = {
+resource apim 'Microsoft.ApiManagement/service@2024-05-01' = {
   name: apimName
   location: location
   tags: tags
   sku: {
-    name: skuParts[0]
-    capacity: int(skuParts[1])
+    name: skuBaseName
+    capacity: skuCapacity
   }
   identity: {
     type: 'SystemAssigned'
@@ -156,16 +152,16 @@ resource apim 'Microsoft.ApiManagement/service@2024-10-01-preview' = {
   properties: {
     publisherName: publisherName
     publisherEmail: publisherEmail
-    virtualNetworkType: apimPublic ? 'External' : 'Internal'
+    // ponytail: PremiumV2 injection is the private-only path; use v2 integration instead if you need public inbound.
+    virtualNetworkType: 'Internal'
     virtualNetworkConfiguration: {
       subnetResourceId: apimSubnetId
     }
-    publicIpAddressId: publicIpId
-    publicNetworkAccess: apimPublic ? 'Enabled' : 'Disabled'
+    publicNetworkAccess: 'Enabled'
   }
 }
 
-resource appInsightsLogger 'Microsoft.ApiManagement/service/loggers@2024-10-01-preview' = {
+resource appInsightsLogger 'Microsoft.ApiManagement/service/loggers@2024-05-01' = {
   parent: apim
   name: 'appinsights'
   properties: {
@@ -177,7 +173,7 @@ resource appInsightsLogger 'Microsoft.ApiManagement/service/loggers@2024-10-01-p
   }
 }
 
-resource namedValues 'Microsoft.ApiManagement/service/namedValues@2024-10-01-preview' = [for entry in namedValueEntries: {
+resource namedValues 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = [for entry in namedValueEntries: {
   parent: apim
   name: entry.name
   properties: {
@@ -187,7 +183,7 @@ resource namedValues 'Microsoft.ApiManagement/service/namedValues@2024-10-01-pre
   }
 }]
 
-resource openAiApi 'Microsoft.ApiManagement/service/apis@2024-10-01-preview' = {
+resource openAiApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   parent: apim
   name: 'openai-gateway'
   properties: {
@@ -202,7 +198,7 @@ resource openAiApi 'Microsoft.ApiManagement/service/apis@2024-10-01-preview' = {
   }
 }
 
-resource foundryApi 'Microsoft.ApiManagement/service/apis@2024-10-01-preview' = {
+resource foundryApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   parent: apim
   name: 'foundry-gateway'
   properties: {
@@ -217,7 +213,7 @@ resource foundryApi 'Microsoft.ApiManagement/service/apis@2024-10-01-preview' = 
   }
 }
 
-resource openAiApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-10-01-preview' = {
+resource openAiApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' = {
   parent: openAiApi
   name: 'policy'
   properties: {
@@ -226,7 +222,7 @@ resource openAiApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-10-
   }
 }
 
-resource foundryApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-10-01-preview' = {
+resource foundryApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' = {
   parent: foundryApi
   name: 'policy'
   properties: {
@@ -235,7 +231,7 @@ resource foundryApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-10
   }
 }
 
-resource openAiDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2024-10-01-preview' = {
+resource openAiDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2024-05-01' = {
   parent: openAiApi
   name: 'applicationinsights'
   properties: {
@@ -286,7 +282,7 @@ resource openAiDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@202
   }
 }
 
-resource foundryDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2024-10-01-preview' = {
+resource foundryDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2024-05-01' = {
   parent: foundryApi
   name: 'applicationinsights'
   properties: {
@@ -360,5 +356,5 @@ resource foundryUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
 output apimId string = apim.id
 output apimName string = apim.name
 output gatewayUrl string = 'https://${apim.name}.azure-api.net'
-output privateIpAddress string = apim.properties.privateIPAddresses[0]
+output privateIpAddress string = !empty(apim.properties.privateIPAddresses) ? apim.properties.privateIPAddresses[0] : ''
 output identityPrincipalId string = apim.identity.principalId

@@ -53,11 +53,8 @@ param apimPublisherName string
 @description('APIM publisher contact email.')
 param apimPublisherEmail string
 
-@description('APIM SKU in Name_Capacity format, for example Developer_1 or Premium_1.')
-param apimSkuName string = 'Developer_1'
-
-@description('Expose APIM on the public gateway VIP while keeping VNet injection enabled. Default false keeps APIM internal-only.')
-param apimPublic bool = false
+@description('APIM SKU name. Use PremiumV2 for fast v2 VNet injection. Legacy classic Name_Capacity values such as Developer_1 are still accepted.')
+param apimSkuName string = 'PremiumV2'
 
 @description('Expose the admin UI Container App externally. Default false keeps the Container Apps environment internal-only.')
 param adminUiPublic bool = false
@@ -245,8 +242,6 @@ module network 'core/network/vnet.bicep' = {
     location: location
     tags: tags
     nameSuffix: nameSuffix
-    resourceToken: resourceToken
-    apimPublic: apimPublic
   }
 }
 
@@ -357,8 +352,6 @@ module apim 'core/apim/apim.bicep' = {
     publisherName: apimPublisherName
     publisherEmail: apimPublisherEmail
     apimSubnetId: network.outputs.apimSubnetId
-    publicIpId: network.outputs.apimPublicIpId
-    apimPublic: apimPublic
     openaiAccountId: openai.outputs.accountId
     foundryAccountId: foundry.outputs.accountId
     openaiPathBase: '${openai.outputs.endpoint}/openai'

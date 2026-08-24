@@ -9,12 +9,6 @@ param tags object = {}
 @description('Deterministic name suffix shared across resources in this stack.')
 param nameSuffix string
 
-@description('Unique token used where Azure requires globally-unique names.')
-param resourceToken string
-
-@description('When true, the APIM subnet admits inbound HTTPS from the internet for external VNet mode.')
-param apimPublic bool = false
-
 @description('Address space for the gateway virtual network.')
 param vnetCidr string = '10.40.0.0/16'
 
@@ -73,22 +67,35 @@ var apimSecurityRules = concat([
       direction: 'Inbound'
     }
   }
-], apimPublic ? [
   {
-    name: 'in-internet-https'
+    name: 'out-storage-https'
     properties: {
-      description: 'Only added for APIM external mode. Pair with edge protection before using in production.'
+      description: 'Allow PremiumV2 APIM dependency traffic to Azure Storage.'
       protocol: 'Tcp'
       sourcePortRange: '*'
       destinationPortRange: '443'
-      sourceAddressPrefix: 'Internet'
-      destinationAddressPrefix: 'VirtualNetwork'
+      sourceAddressPrefix: 'VirtualNetwork'
+      destinationAddressPrefix: 'Storage'
       access: 'Allow'
-      priority: 105
-      direction: 'Inbound'
+      priority: 200
+      direction: 'Outbound'
     }
   }
-] : [])
+  {
+    name: 'out-keyvault-https'
+    properties: {
+      description: 'Allow PremiumV2 APIM dependency traffic to Azure Key Vault.'
+      protocol: 'Tcp'
+      sourcePortRange: '*'
+      destinationPortRange: '443'
+      sourceAddressPrefix: 'VirtualNetwork'
+      destinationAddressPrefix: 'AzureKeyVault'
+      access: 'Allow'
+      priority: 210
+      direction: 'Outbound'
+    }
+  }
+])
 
 resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: 'vnet-${nameSuffix}'
@@ -120,6 +127,14 @@ resource apimSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' = {
     networkSecurityGroup: {
       id: apimNsg.id
     }
+    delegations: [
+      {
+        name: 'apim-premiumv2-delegation'
+        properties: {
+          serviceName: 'Microsoft.Web/hostingEnvironments'
+        }
+      }
+    ]
   }
 }
 
@@ -145,21 +160,6 @@ resource containerAppsSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-
         }
       }
     ]
-  }
-}
-
-resource apimPublicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
-  name: 'pip-apim-${nameSuffix}'
-  location: location
-  tags: tags
-  sku: {
-    name: 'Standard'
-  }
-  properties: {
-    publicIPAllocationMethod: 'Static'
-    dnsSettings: {
-      domainNameLabel: 'apim-${take(resourceToken, 12)}'
-    }
   }
 }
 
@@ -262,7 +262,6 @@ output vnetId string = vnet.id
 output apimSubnetId string = apimSubnet.id
 output privateEndpointSubnetId string = privateEndpointSubnet.id
 output containerAppsSubnetId string = containerAppsSubnet.id
-output apimPublicIpId string = apimPublicIp.id
 output openAiPrivateDnsZoneId string = openAiDns.id
 output keyVaultPrivateDnsZoneId string = keyVaultDns.id
 output cosmosPrivateDnsZoneId string = cosmosDns.id
