@@ -97,7 +97,7 @@
         var path = context.Request.OriginalUrl.Path;
         var marker = &quot;/deployments/&quot;;
         var start = path.IndexOf(marker, System.StringComparison.OrdinalIgnoreCase);
-        if (start &lt; 0) return &quot;&quot;;
+        if (start &lt; 0) { return &quot;&quot;; }
         start += marker.Length;
         var end = path.IndexOf('/', start);
         return end &lt; 0 ? path.Substring(start) : path.Substring(start, end - start);
@@ -127,7 +127,7 @@
         var consumer = (string)context.Variables[&quot;consumerId&quot;];
         var probe = string.Concat(&quot;\&quot;&quot;, consumer, &quot;\&quot;:{\&quot;tier\&quot;:\&quot;&quot;);
         var index = body.IndexOf(probe, System.StringComparison.OrdinalIgnoreCase);
-        if (index &lt; 0) return &quot;&quot;;
+        if (index &lt; 0) { return &quot;&quot;; }
         var start = index + probe.Length;
         var end = body.IndexOf('&quot;', start);
         return end &lt; 0 ? &quot;&quot; : body.Substring(start, end - start);

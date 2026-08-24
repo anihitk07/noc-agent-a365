@@ -98,9 +98,9 @@
         var body = (string)context.Variables[&quot;requestBody&quot;];
         var marker = &quot;\&quot;model\&quot;:&quot;;
         var index = body.IndexOf(marker, System.StringComparison.OrdinalIgnoreCase);
-        if (index &lt; 0) return &quot;&quot;;
+        if (index &lt; 0) { return &quot;&quot;; }
         var start = body.IndexOf('&quot;', index + marker.Length);
-        if (start &lt; 0) return &quot;&quot;;
+        if (start &lt; 0) { return &quot;&quot;; }
         start += 1;
         var end = body.IndexOf('&quot;', start);
         return end &lt; 0 ? &quot;&quot; : body.Substring(start, end - start);
