@@ -51,6 +51,7 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
   }
 }
 
+@batchSize(1) // ponytail: Azure OpenAI/Cognitive Services rejects concurrent deployment writes on the same account; serialize.
 resource deploymentResources 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = [for deployment in deployments: {
   parent: account
   name: deployment.name
