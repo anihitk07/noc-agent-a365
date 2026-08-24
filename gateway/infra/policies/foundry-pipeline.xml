@@ -1,6 +1,84 @@
 <policies>
   <inbound>
     <base />
+    <validate-jwt header-name="x-run-token" output-token-variable-name="runjwt"
+                  failed-validation-httpcode="403"
+                  failed-validation-error-message="Missing or invalid run token">
+      <issuer-signing-keys>
+        <key>{{RUN_TOKEN_SIGNING_KEY_NAMED_VALUE}}</key>
+      </issuer-signing-keys>
+      <issuers>
+        <issuer>run-ledger</issuer>
+      </issuers>
+    </validate-jwt>
+    <set-variable name="runId"
+      value="@(((Jwt)context.Variables[&quot;runjwt&quot;]).Claims.GetValueOrDefault(&quot;run_id&quot;,&quot;&quot;))" />
+    <set-variable name="body" value="@(context.Request.Body.As&lt;JObject&gt;(preserveContent: true))" />
+    <llm-token-limit counter-key="@((string)context.Variables[&quot;runId&quot;])"
+                     token-quota="{{RUN_TOKEN_QUOTA}}"
+                     token-quota-period="{{RUN_TOKEN_QUOTA_PERIOD}}"
+                     tokens-per-minute="{{RUN_TOKENS_PER_MINUTE}}"
+                     estimate-prompt-tokens="true"
+                     remaining-quota-tokens-header-name="x-run-remaining-tokens" />
+    <send-request mode="new" response-variable-name="decisionRes" timeout="2" ignore-error="true">
+      <set-url>{{RUN_LEDGER_BASE_URL}}/v1/precall</set-url>
+      <set-method>POST</set-method>
+      <set-header name="Content-Type">
+        <value>application/json</value>
+      </set-header>
+      <set-body>@{
+        var b = (JObject)context.Variables[&quot;body&quot;];
+        return new JObject(
+          new JProperty(&quot;run_id&quot;, (string)context.Variables[&quot;runId&quot;]),
+          new JProperty(&quot;agent&quot;, context.Request.Headers.GetValueOrDefault(&quot;x-agent&quot;,&quot;unknown&quot;)),
+          new JProperty(&quot;step&quot;, context.Request.Headers.GetValueOrDefault(&quot;x-step&quot;,&quot;0&quot;)),
+          new JProperty(&quot;model&quot;, (string)b[&quot;model&quot;]),
+          new JProperty(&quot;est_input_tokens&quot;, b[&quot;messages&quot;].ToString().Length / 4),
+          new JProperty(&quot;max_output_tokens&quot;, (int?)b[&quot;max_tokens&quot;] ?? 1024),
+          new JProperty(&quot;prompt_hash&quot;, (b[&quot;messages&quot;].ToString()).GetHashCode().ToString())
+        ).ToString();
+      }</set-body>
+    </send-request>
+    <set-variable name="d"
+      value="@(((IResponse)context.Variables[&quot;decisionRes&quot;]).Body.As&lt;JObject&gt;())" />
+    <choose>
+      <when condition="@((string)((JObject)context.Variables[&quot;d&quot;])[&quot;action&quot;] == &quot;halt&quot;)">
+        <return-response>
+          <set-status code="403" reason="Run halted" />
+          <set-header name="x-run-halt-reason">
+            <value>@((string)((JObject)context.Variables[&quot;d&quot;])[&quot;halt_reason&quot;])</value>
+          </set-header>
+          <set-body>@("{&quot;error&quot;:{&quot;code&quot;:&quot;run_halted&quot;,&quot;message&quot;:&quot;Run budget or policy exhausted.&quot;}}")</set-body>
+        </return-response>
+      </when>
+      <when condition="@((string)((JObject)context.Variables[&quot;d&quot;])[&quot;action&quot;] == &quot;queue&quot;)">
+        <return-response>
+          <set-status code="429" reason="Run concurrency cap" />
+          <set-header name="Retry-After">
+            <value>2</value>
+          </set-header>
+        </return-response>
+      </when>
+      <when condition="@((string)((JObject)context.Variables[&quot;d&quot;])[&quot;action&quot;] == &quot;mutate&quot;)">
+        <set-body>@{
+          var b = (JObject)context.Variables[&quot;body&quot;];
+          var d = (JObject)context.Variables[&quot;d&quot;];
+          if (d[&quot;model_override&quot;] != null)  { b[&quot;model&quot;] = (string)d[&quot;model_override&quot;]; }
+          if (d[&quot;max_output_tokens&quot;] != null) { b[&quot;max_tokens&quot;] = (int)d[&quot;max_output_tokens&quot;]; }
+          if (d[&quot;inject&quot;] != null) {
+            ((JArray)b[&quot;messages&quot;]).Add(new JObject(
+              new JProperty(&quot;role&quot;,&quot;system&quot;),
+              new JProperty(&quot;content&quot;,(string)d[&quot;inject&quot;])));
+          }
+          if ((bool?)b[&quot;stream&quot;] == true) {
+            b[&quot;stream_options&quot;] = new JObject(new JProperty(&quot;include_usage&quot;, true));
+          }
+          return b.ToString();
+        }</set-body>
+      </when>
+    </choose>
+    <set-variable name="reservationId"
+      value="@((string)((JObject)context.Variables[&quot;d&quot;])[&quot;reservation_id&quot;])" />
     {{JWT_BLOCK}}
     <set-variable name="consumerId" value="@{
         var claimValue = context.Subscription?.Name;
@@ -40,12 +118,41 @@
   </backend>
   <outbound>
     <base />
+    <send-one-way-request mode="new">
+      <set-url>{{RUN_LEDGER_BASE_URL}}/v1/postcall</set-url>
+      <set-method>POST</set-method>
+      <set-header name="Content-Type">
+        <value>application/json</value>
+      </set-header>
+      <set-body>@{
+        var r = context.Response.Body.As&lt;JObject&gt;(preserveContent: true);
+        var u = r[&quot;usage&quot;];
+        return new JObject(
+          new JProperty(&quot;run_id&quot;, (string)context.Variables[&quot;runId&quot;]),
+          new JProperty(&quot;reservation_id&quot;, (string)context.Variables[&quot;reservationId&quot;]),
+          new JProperty(&quot;input_tokens&quot;,  (int?)u?[&quot;prompt_tokens&quot;] ?? 0),
+          new JProperty(&quot;output_tokens&quot;, (int?)u?[&quot;completion_tokens&quot;] ?? 0),
+          new JProperty(&quot;model&quot;, (string)r[&quot;model&quot;])
+        ).ToString();
+      }</set-body>
+    </send-one-way-request>
     <set-header name="x-gateway-backend" exists-action="override">
       <value>foundry</value>
     </set-header>
   </outbound>
   <on-error>
     <base />
+    <send-one-way-request mode="new">
+      <set-url>{{RUN_LEDGER_BASE_URL}}/v1/postcall</set-url>
+      <set-method>POST</set-method>
+      <set-header name="Content-Type">
+        <value>application/json</value>
+      </set-header>
+      <set-body>@(new JObject(
+        new JProperty(&quot;run_id&quot;,(string)context.Variables[&quot;runId&quot;]),
+        new JProperty(&quot;reservation_id&quot;,(string)context.Variables[&quot;reservationId&quot;]),
+        new JProperty(&quot;failed&quot;, true)).ToString())</set-body>
+    </send-one-way-request>
     <choose>
       <when condition="@(context.Response != null &amp;&amp; (context.Response.StatusCode == 429 || context.Response.StatusCode &gt;= 500))">
         <rewrite-uri template="/deployments/@((string)context.Variables[&quot;requestDeployment&quot;])/responses?api-version={{OPENAI_API_VERSION}}" copy-unmatched-params="false" />

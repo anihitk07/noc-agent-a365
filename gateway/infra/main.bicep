@@ -128,6 +128,22 @@ param tokenQuota int = 50000
 @description('Fallback token quota reset period used when a consumer has no named tier.')
 param tokenQuotaPeriod string = 'Daily'
 
+@description('Run-scoped token-per-minute limit enforced before the ledger hop.')
+param runTokensPerMinute int = 1000
+
+@description('Run-scoped token quota enforced before the ledger hop.')
+param runTokenQuota int = 50000
+
+@allowed([
+  'Hourly'
+  'Daily'
+  'Weekly'
+  'Monthly'
+  'Yearly'
+])
+@description('Run-scoped token quota reset period enforced before the ledger hop.')
+param runTokenQuotaPeriod string = 'Daily'
+
 @description('Model deployment names callers are allowed to request.')
 param allowedModels string[] = [
   'gpt-5.4'
@@ -173,6 +189,22 @@ param configSyncCron string = '*/5 * * * *'
 @description('Full image reference for the admin UI container. Empty skips the Container App.')
 param adminUiImage string = ''
 
+@description('Full image reference for the run-ledger container. Empty skips the Container App.')
+param runLedgerImage string = ''
+
+@description('Expose the run-ledger Container App externally. Default false keeps it internal-only.')
+param runLedgerPublic bool = false
+
+@description('Serialized per-model prices injected into the run-ledger service.')
+param modelPricesJson string = '{}'
+
+@description('Key Vault secret name holding the run-token signing key.')
+param runTokenSigningSecretName string = 'run-token-signing-key'
+
+@description('Run token signing secret value. Supply at deploy time; do not commit literal values.')
+@secure()
+param runTokenSigningSecretValue string
+
 @allowed([
   'subscription-key'
   'entra-id'
@@ -211,6 +243,8 @@ var regionShortMap = {
 var locationShort = regionShortMap[?location] ?? take(replace(location, ' ', ''), 6)
 var nameSuffix = '${prefix}-${env}-${locationShort}'
 var resourceToken = uniqueString(subscription().id, resourceGroupName, location)
+var apimResourceName = toLower(take('apim${replace(nameSuffix, '-', '')}${resourceToken}', 50))
+var apimResourceId = resourceId(resourceGroupName, 'Microsoft.ApiManagement/service', apimResourceName)
 var openAiAliasNames = [for deployment in openaiDeployments: deployment.name]
 var foundryAliasNames = [for deployment in foundryDeployments: deployment.name]
 var aliasModelsJson = string({
@@ -326,6 +360,8 @@ module keyVault 'core/security/keyvault.bicep' = {
     resourceToken: resourceToken
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     privateDnsZoneId: network.outputs.keyVaultPrivateDnsZoneId
+    runTokenSigningSecretName: runTokenSigningSecretName
+    runTokenSigningSecretValue: runTokenSigningSecretValue
   }
 }
 
@@ -337,6 +373,44 @@ module registry 'core/registry/acr.bicep' = {
     tags: tags
     prefix: prefix
     resourceToken: resourceToken
+  }
+}
+
+module redis 'core/host/redis.bicep' = {
+  name: 'redis'
+  scope: rg
+  params: {
+    location: location
+    tags: tags
+    nameSuffix: nameSuffix
+    resourceToken: resourceToken
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    privateDnsZoneId: network.outputs.redisPrivateDnsZoneId
+    runLedgerPrincipalId: identities.outputs.runLedgerPrincipalId
+  }
+}
+
+module runLedger 'core/host/run-ledger.bicep' = {
+  name: 'run-ledger'
+  scope: rg
+  params: {
+    location: location
+    tags: tags
+    nameSuffix: nameSuffix
+    managedEnvironmentId: containerApps.outputs.environmentId
+    acrId: registry.outputs.registryId
+    acrLoginServer: registry.outputs.loginServer
+    runLedgerImage: runLedgerImage
+    runLedgerIdentityId: identities.outputs.runLedgerIdentityId
+    runLedgerPrincipalId: identities.outputs.runLedgerPrincipalId
+    runLedgerClientId: identities.outputs.runLedgerClientId
+    keyVaultUrl: keyVault.outputs.vaultUri
+    keyVaultResourceId: keyVault.outputs.vaultId
+    runTokenSigningSecretName: runTokenSigningSecretName
+    redisHostName: redis.outputs.hostName
+    redisPort: redis.outputs.port
+    modelPricesJson: modelPricesJson
+    runLedgerPublic: runLedgerPublic
   }
 }
 
@@ -363,6 +437,12 @@ module apim 'core/apim/apim.bicep' = {
     tokensPerMinute: tokensPerMinute
     tokenQuota: tokenQuota
     tokenQuotaPeriod: tokenQuotaPeriod
+    runLedgerBaseUrl: runLedger.outputs.appFqdn
+    runTokensPerMinute: runTokensPerMinute
+    runTokenQuota: runTokenQuota
+    runTokenQuotaPeriod: runTokenQuotaPeriod
+    keyVaultResourceId: keyVault.outputs.vaultId
+    runTokenSigningSecretIdentifier: keyVault.outputs.runTokenSigningSecretIdentifier
     allowedModels: allowedModels
     rateTiers: rateTiers
     clientAuthMode: clientAuthMode
@@ -385,8 +465,8 @@ module containerApps 'core/host/container-apps.bicep' = {
     logAnalyticsSharedKey: listKeys(resourceId(resourceGroupName, 'Microsoft.OperationalInsights/workspaces', 'law-${nameSuffix}'), '2023-09-01').primarySharedKey
     acrId: registry.outputs.registryId
     acrLoginServer: registry.outputs.loginServer
-    apimId: apim.outputs.apimId
-    apimName: apim.outputs.apimName
+    apimId: apimResourceId
+    apimName: apimResourceName
     workerIdentityId: identities.outputs.workerIdentityId
     workerPrincipalId: identities.outputs.workerPrincipalId
     workerClientId: identities.outputs.workerClientId
@@ -422,3 +502,4 @@ output keyVaultUri string = keyVault.outputs.vaultUri
 output containerAppsEnvironmentId string = containerApps.outputs.environmentId
 output configSyncJobName string = containerApps.outputs.jobName
 output adminUiFqdn string = containerApps.outputs.adminUiFqdn
+output runLedgerFqdn string = runLedger.outputs.appFqdn

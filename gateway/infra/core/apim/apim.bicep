@@ -79,6 +79,25 @@ param entraApiAudience string
 @description('JWT claim used to derive the consumer identifier in entra-id mode.')
 param entraTeamClaim string
 
+@description('Base URL of the internal run-ledger service.')
+param runLedgerBaseUrl string
+
+@description('Run-scoped token-per-minute limit enforced before the ledger hop.')
+param runTokensPerMinute int
+
+@description('Run-scoped token quota enforced before the ledger hop.')
+param runTokenQuota int
+
+@description('Run-scoped token quota reset period enforced before the ledger hop.')
+param runTokenQuotaPeriod string
+
+@description('Resource ID of the Key Vault that stores the run-token signing secret.')
+param keyVaultResourceId string
+
+@description('Unversioned Key Vault secret identifier for the run-token signing key.')
+@secure()
+param runTokenSigningSecretIdentifier string
+
 var apimName = toLower(take('apim${replace(nameSuffix, '-', '')}${resourceToken}', 50))
 var skuParts = split(skuName, '_')
 var skuBaseName = length(skuParts) > 1 ? skuParts[0] : skuName
@@ -87,11 +106,16 @@ var openaiPolicyTemplate = loadTextContent('../../policies/openai-pipeline.xml')
 var foundryPolicyTemplate = loadTextContent('../../policies/foundry-pipeline.xml')
 var jwtBlock = clientAuthMode == 'entra-id' ? '<validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized"><openid-config url="${environment().authentication.loginEndpoint}${entraTenantId}/v2.0/.well-known/openid-configuration" /><audiences><audience>${entraApiAudience}</audience></audiences><require-scheme>Bearer</require-scheme></validate-jwt>' : ''
 var allowedModelsJson = string(allowedModels)
-var openaiPolicy = replace(replace(replace(replace(replace(replace(replace(replace(openaiPolicyTemplate, '{{JWT_BLOCK}}', jwtBlock), '{{CLIENT_AUTH_MODE}}', clientAuthMode), '{{ENTRA_TEAM_CLAIM}}', entraTeamClaim), '{{ALLOWED_MODELS_JSON}}', allowedModelsJson), '{{DEFAULT_TPM}}', string(tokensPerMinute)), '{{DEFAULT_QUOTA}}', string(tokenQuota)), '{{DEFAULT_QUOTA_PERIOD}}', tokenQuotaPeriod), '{{OPENAI_BASE_URL}}', openaiPathBase)
+var runLedgerBaseUrlNamedValueName = 'run-ledger-base-url'
+var runTokenSigningKeyNamedValueName = 'run-token-signing-key'
+var runLedgerBaseUrlNamedValueReference = '{{${runLedgerBaseUrlNamedValueName}}}'
+var runTokenSigningKeyNamedValueReference = '{{${runTokenSigningKeyNamedValueName}}}'
+var openaiPolicy = replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(openaiPolicyTemplate, '{{JWT_BLOCK}}', jwtBlock), '{{CLIENT_AUTH_MODE}}', clientAuthMode), '{{ENTRA_TEAM_CLAIM}}', entraTeamClaim), '{{ALLOWED_MODELS_JSON}}', allowedModelsJson), '{{DEFAULT_TPM}}', string(tokensPerMinute)), '{{DEFAULT_QUOTA}}', string(tokenQuota)), '{{DEFAULT_QUOTA_PERIOD}}', tokenQuotaPeriod), '{{OPENAI_BASE_URL}}', openaiPathBase), '{{RUN_LEDGER_BASE_URL}}', runLedgerBaseUrlNamedValueReference), '{{RUN_TOKEN_SIGNING_KEY_NAMED_VALUE}}', runTokenSigningKeyNamedValueReference), '{{RUN_TOKEN_QUOTA}}', string(runTokenQuota)), '{{RUN_TOKEN_QUOTA_PERIOD}}', runTokenQuotaPeriod), '{{RUN_TOKENS_PER_MINUTE}}', string(runTokensPerMinute))
 var openaiPolicyRendered = replace(replace(openaiPolicy, '{{FOUNDRY_BASE_URL}}', foundryV1Base), '{{OPENAI_API_VERSION}}', openaiApiVersion)
-var foundryPolicy = replace(replace(replace(replace(replace(replace(foundryPolicyTemplate, '{{JWT_BLOCK}}', jwtBlock), '{{CLIENT_AUTH_MODE}}', clientAuthMode), '{{ENTRA_TEAM_CLAIM}}', entraTeamClaim), '{{ALLOWED_MODELS_JSON}}', allowedModelsJson), '{{FOUNDRY_BASE_URL}}', foundryV1Base), '{{OPENAI_BASE_URL}}', openaiPathBase)
+var foundryPolicy = replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(foundryPolicyTemplate, '{{JWT_BLOCK}}', jwtBlock), '{{CLIENT_AUTH_MODE}}', clientAuthMode), '{{ENTRA_TEAM_CLAIM}}', entraTeamClaim), '{{ALLOWED_MODELS_JSON}}', allowedModelsJson), '{{FOUNDRY_BASE_URL}}', foundryV1Base), '{{OPENAI_BASE_URL}}', openaiPathBase), '{{RUN_LEDGER_BASE_URL}}', runLedgerBaseUrlNamedValueReference), '{{RUN_TOKEN_SIGNING_KEY_NAMED_VALUE}}', runTokenSigningKeyNamedValueReference), '{{RUN_TOKEN_QUOTA}}', string(runTokenQuota)), '{{RUN_TOKEN_QUOTA_PERIOD}}', runTokenQuotaPeriod), '{{RUN_TOKENS_PER_MINUTE}}', string(runTokensPerMinute))
 var foundryPolicyRendered = replace(foundryPolicy, '{{OPENAI_API_VERSION}}', openaiApiVersion)
 var defaultConsumerConfig = base64('{}')
+var keyVaultSecretsUserRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
 var coreNamedValueEntries = [
   {
     name: 'consumer-config-json'
@@ -112,6 +136,10 @@ var coreNamedValueEntries = [
   {
     name: 'token-quota-period-default'
     value: tokenQuotaPeriod
+  }
+  {
+    name: runLedgerBaseUrlNamedValueName
+    value: runLedgerBaseUrl
   }
 ]
 var tierTpmNamedValues = [for tierName in items(rateTiers): {
@@ -138,6 +166,11 @@ resource foundryAccount 'Microsoft.CognitiveServices/accounts@2025-06-01' existi
   name: last(split(foundryAccountId, '/'))
 }
 
+resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' existing = {
+  scope: resourceGroup()
+  name: last(split(keyVaultResourceId, '/'))
+}
+
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' = {
   name: apimName
   location: location
@@ -158,6 +191,16 @@ resource apim 'Microsoft.ApiManagement/service@2024-05-01' = {
       subnetResourceId: apimSubnetId
     }
     publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource apimKeyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, apim.id, 'apim-kv-secrets-user')
+  scope: keyVault
+  properties: {
+    principalId: apim.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: keyVaultSecretsUserRoleDefinitionId
   }
 }
 
@@ -182,6 +225,21 @@ resource namedValues 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = 
     secret: false
   }
 }]
+
+resource runTokenSigningKeyNamedValue 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
+  parent: apim
+  name: runTokenSigningKeyNamedValueName
+  properties: {
+    displayName: runTokenSigningKeyNamedValueName
+    keyVault: {
+      secretIdentifier: runTokenSigningSecretIdentifier
+    }
+    secret: true
+  }
+  dependsOn: [
+    apimKeyVaultSecretsUser
+  ]
+}
 
 resource openAiApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   parent: apim

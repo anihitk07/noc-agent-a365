@@ -193,6 +193,12 @@ resource aiServicesDns 'Microsoft.Network/privateDnsZones@2024-06-01' = {
   tags: tags
 }
 
+resource redisDns 'Microsoft.Network/privateDnsZones@2024-06-01' = {
+  name: 'privatelink.redis.azure.net'
+  location: 'global'
+  tags: tags
+}
+
 resource openAiDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
   parent: openAiDns
   name: 'link-openai'
@@ -258,6 +264,19 @@ resource aiServicesDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLink
   }
 }
 
+resource redisDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
+  parent: redisDns
+  name: 'link-redis'
+  location: 'global'
+  tags: tags
+  properties: {
+    virtualNetwork: {
+      id: vnet.id
+    }
+    registrationEnabled: false
+  }
+}
+
 output vnetId string = vnet.id
 output apimSubnetId string = apimSubnet.id
 output privateEndpointSubnetId string = privateEndpointSubnet.id
@@ -267,3 +286,4 @@ output keyVaultPrivateDnsZoneId string = keyVaultDns.id
 output cosmosPrivateDnsZoneId string = cosmosDns.id
 output cognitiveServicesPrivateDnsZoneId string = cognitiveServicesDns.id
 output aiServicesPrivateDnsZoneId string = aiServicesDns.id
+output redisPrivateDnsZoneId string = redisDns.id

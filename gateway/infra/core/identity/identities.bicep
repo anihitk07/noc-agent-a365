@@ -21,9 +21,18 @@ resource adminUiIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-
   tags: tags
 }
 
+resource runLedgerIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-runledger-${nameSuffix}'
+  location: location
+  tags: tags
+}
+
 output workerIdentityId string = workerIdentity.id
 output workerPrincipalId string = workerIdentity.properties.principalId
 output workerClientId string = workerIdentity.properties.clientId
 output adminUiIdentityId string = adminUiIdentity.id
 output adminUiPrincipalId string = adminUiIdentity.properties.principalId
 output adminUiClientId string = adminUiIdentity.properties.clientId
+output runLedgerIdentityId string = runLedgerIdentity.id
+output runLedgerPrincipalId string = runLedgerIdentity.properties.principalId
+output runLedgerClientId string = runLedgerIdentity.properties.clientId

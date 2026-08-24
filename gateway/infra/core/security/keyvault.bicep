@@ -18,6 +18,13 @@ param privateEndpointSubnetId string
 @description('Private DNS zone for privatelink.vaultcore.azure.net.')
 param privateDnsZoneId string
 
+@description('Secret name holding the run token signing key.')
+param runTokenSigningSecretName string = 'run-token-signing-key'
+
+@description('Secret value for the run token signing key. Supply at deploy time; do not commit literal values.')
+@secure()
+param runTokenSigningSecretValue string
+
 var vaultName = toLower(take('kv${replace(nameSuffix, '-', '')}${resourceToken}', 24))
 
 resource vault 'Microsoft.KeyVault/vaults@2024-11-01' = {
@@ -76,6 +83,18 @@ resource privateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneG
   }
 }
 
+resource runTokenSigningSecret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = {
+  parent: vault
+  name: runTokenSigningSecretName
+  properties: {
+    value: runTokenSigningSecretValue
+    attributes: {
+      enabled: true
+    }
+  }
+}
+
 output vaultId string = vault.id
 output vaultName string = vault.name
 output vaultUri string = vault.properties.vaultUri
+output runTokenSigningSecretIdentifier string = '${vault.properties.vaultUri}secrets/${runTokenSigningSecret.name}'

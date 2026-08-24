@@ -33,6 +33,9 @@ param runLedgerClientId string
 @description('Key Vault URL used by the run-ledger app.')
 param keyVaultUrl string
 
+@description('Key Vault resource ID used to grant the run-ledger identity secret read access.')
+param keyVaultResourceId string
+
 @description('Key Vault secret name holding the run-token signing key.')
 param runTokenSigningSecretName string = 'run-token-signing-key'
 
@@ -51,6 +54,12 @@ param runLedgerPublic bool = false
 var runLedgerEnabled = !empty(runLedgerImage)
 var appName = runLedgerEnabled ? 'ca-runledger-${nameSuffix}' : ''
 var acrPullRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+var keyVaultSecretsUserRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
+
+resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' existing = if (runLedgerEnabled) {
+  scope: resourceGroup()
+  name: last(split(keyVaultResourceId, '/'))
+}
 
 resource runLedgerAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (runLedgerEnabled) {
   name: guid(acrId, runLedgerPrincipalId, 'runledger-acrpull')
@@ -59,6 +68,16 @@ resource runLedgerAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' =
     principalId: runLedgerPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: acrPullRoleDefinitionId
+  }
+}
+
+resource runLedgerKeyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (runLedgerEnabled) {
+  name: guid(keyVaultResourceId, runLedgerPrincipalId, 'runledger-kv-secrets-user')
+  scope: keyVault
+  properties: {
+    principalId: runLedgerPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: keyVaultSecretsUserRoleDefinitionId
   }
 }
 
