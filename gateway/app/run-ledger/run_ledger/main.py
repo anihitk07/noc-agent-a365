@@ -1,5 +1,6 @@
 """Production entrypoint: Key Vault-managed signing key + Azure Managed Redis client."""
 
+import base64
 import logging
 import os
 import time
@@ -40,7 +41,10 @@ def build_app():
     settings = Settings.from_env()
     credential = DefaultAzureCredential()
     secret_client = SecretClient(vault_url=settings.key_vault_url, credential=credential)
-    signing_secret = secret_client.get_secret(settings.run_token_signing_secret_name).value
+    # ponytail: the signing secret is stored base64-encoded so APIM's validate-jwt
+    # <key> element (which always base64-decodes its content) and this signer
+    # operate on the identical raw HMAC key bytes.
+    signing_secret = base64.b64decode(secret_client.get_secret(settings.run_token_signing_secret_name).value)
 
     redis_credential_provider = EntraRedisCredentialProvider(
         credential=credential,

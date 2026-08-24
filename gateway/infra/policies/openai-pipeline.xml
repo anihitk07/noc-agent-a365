@@ -89,7 +89,7 @@
         if (&quot;{{CLIENT_AUTH_MODE}}&quot; == &quot;entra-id&quot;)
         {
             var jwt = context.Variables.GetValueOrDefault&lt;Jwt&gt;(&quot;entraJwt&quot;);
-                claimValue = jwt?.Claims.GetValueOrDefault(&quot;{{ENTRA_TEAM_CLAIM}}&quot;, null);
+                claimValue = jwt?.Claims.GetValueOrDefault(&quot;{{ENTRA_TEAM_CLAIM}}&quot;, string.Empty);
         }
         return string.IsNullOrEmpty(claimValue) ? &quot;anonymous&quot; : claimValue;
     }" />
