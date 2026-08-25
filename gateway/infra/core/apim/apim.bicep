@@ -332,13 +332,44 @@ resource adminUiApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = if (admi
   }
 }
 
-resource adminUiApiWildcardOperation 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = if (adminUiEnabled) {
+// ponytail: APIM operations don't support a literal '*' method or '/*' urlTemplate -- that
+// was never a deployable shape, just a placeholder that got live-patched via CLI into these
+// 8 explicit operations (7 verbs against the {*path} catch-all, plus a dedicated root GET,
+// since {*path} alone doesn't match the bare '/'). Reconciled here to match what's live.
+var adminUiPassthroughMethods = [
+  'GET'
+  'POST'
+  'PUT'
+  'DELETE'
+  'PATCH'
+  'HEAD'
+  'OPTIONS'
+]
+
+resource adminUiApiPassthroughOperations 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = [for method in adminUiPassthroughMethods: if (adminUiEnabled) {
   parent: adminUiApi
-  name: 'passthrough-any'
+  name: 'passthrough-${toLower(method)}'
   properties: {
-    displayName: 'Passthrough any route/method'
-    method: '*'
-    urlTemplate: '/*'
+    displayName: 'Passthrough ${method}'
+    method: method
+    urlTemplate: '/{*path}'
+    templateParameters: [
+      {
+        name: 'path'
+        required: true
+        type: 'string'
+      }
+    ]
+  }
+}]
+
+resource adminUiApiRootGetOperation 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = if (adminUiEnabled) {
+  parent: adminUiApi
+  name: 'passthrough-root-get'
+  properties: {
+    displayName: 'Passthrough root GET'
+    method: 'GET'
+    urlTemplate: '/'
   }
 }
 

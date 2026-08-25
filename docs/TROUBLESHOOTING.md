@@ -321,3 +321,29 @@ Found and fixed in order while chasing "how do I track token cost" end-to-end:
 | Cost stayed `$0` even after the worker ran cleanly | `pricing.py` (Retail Prices API fetcher + per-model meter-matching + unit-of-measure normalization) already existed fully built and tested, but was never called from `sync.py`, and the `Dockerfile` never `COPY`'d it into the image (`ModuleNotFoundError: No module named 'pricing'` the first time it was wired in) | Added `sync_pricing()` to `sync.py` (fail-safe: logs and leaves the existing doc untouched if the Retail Prices API has no match, never fails the job) and added `pricing.py` to the Dockerfile's `COPY` line. Confirmed live: `synced pricing for 4 model(s) from Retail Prices API`. |
 
 Net result: config-sync-worker now completes end-to-end every run (config → named values → pricing → budget downgrades → consumer config), and real Retail Prices-sourced cost now flows into `check_usage.py`/`check_usage_detail.py`. The only open item is the APIM→internal-ACA reachability gap above, which blocks the public Admin UI portal (not cost tracking itself).
+
+## Live end-to-end verification: real Teams turn → usage report (this session)
+
+Sent real Teams messages to the deployed agent and confirmed the whole
+usage-reporting chain with live data, closing the "not yet done" item from
+the prior session's primer.
+
+| Finding | Detail |
+|---|---|
+| A plain greeting ("status check") produces **no** `usage_event` row | `usage_event` is only logged inside `agent.py`'s `_call_specialist()` — i.e. only when the orchestrator actually routes to one of the 4 specialist agents. A message the orchestrator can answer directly with no tool call legitimately logs nothing. Not a bug; ask something that needs a specialist (runbook/topology/advisory/comms lookup) to generate a row. |
+| `check_usage.py` shows `No usage rows found` even after a real specialist-routed turn | **By design, not a bug.** `check_usage.py`'s `_USAGE_KQL` reads `AppMetrics` rows named `"Prompt Tokens"/"Completion Tokens"`, which APIM's `azure-openai-token-limit` policy only emits for traffic that actually flows through the `openai-gateway`/`foundry-gateway` APIs. Per `gateway/PORTING_NOTES.md`'s "final mixed-routing decision", this app's own agent/model traffic **always bypasses APIM** and calls Foundry directly — those two APIs exist for *other* direct AOAI/Foundry callers, not this app's hot path. `check_usage.py` will correctly show `$0`/nothing for this app forever; that's expected. |
+| `check_usage_detail.py` is the correct tool for this app | It reads the `usage_event` AppTraces rows agent.py emits per specialist call — confirmed live with 4 real requests across all 4 specialists (`noc-knowledge-agent`, `noc-comms-agent`, `noc-threatintel-agent`), real token counts (e.g. 17307 in / 3769 out on one `gpt-5.4` call). |
+| `cost_usd` still shows `0.00000` for these live rows | Same pre-existing, already-documented Cosmos private-endpoint restriction above — pricing lookup 403s from a laptop's public IP. Usage/token data itself is fully verified end-to-end; only the local `$` rendering needs a VNet-internal caller (e.g. exec into `ca-adminui-aigw-dev-eus2`). |
+
+## Bicep/live-state reconciliation (this session)
+
+`gateway/infra/core/apim/apim.bicep`'s `admin-ui-gateway` API still declared the
+old `method: '*'` / `urlTemplate: '/*'` wildcard operation (`passthrough-any`) —
+the exact wildcard-operation bug documented in the table above, whose live fix
+(8 explicit per-verb operations) was applied via CLI but never ported back into
+Bicep. Replaced `passthrough-any` with the live shape: one operation per verb
+(GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS) against `urlTemplate: '/{*path}'` (with
+a declared `path` template parameter), plus a dedicated `passthrough-root-get`
+for the bare `/`. Verified the live API-level policies (`set-backend-service`
+only, no host-header override or extra rewrite-uri) already match what's in
+Bicep as-is — no further drift found there. `az bicep build` compiles clean.
