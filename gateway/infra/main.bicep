@@ -491,6 +491,22 @@ module containerApps 'core/host/container-apps.bicep' = {
   }
 }
 
+// ponytail: separate module because managedEnvironment.properties.defaultDomain is
+// only known after the environment deploys -- can't be a same-scope resource `name`
+// (BCP120). Module-output -> next-module-param is the accepted way to sequence it.
+// Without this zone, APIM (same VNet, different subnet) can't resolve internal-ingress
+// Container App FQDNs and every backend call fails "No such host is known" -> 500.
+module containerAppsDns 'core/network/container-apps-dns.bicep' = {
+  name: 'container-apps-dns'
+  scope: rg
+  params: {
+    tags: tags
+    vnetId: network.outputs.vnetId
+    defaultDomain: containerApps.outputs.environmentDefaultDomain
+    staticIp: containerApps.outputs.environmentStaticIp
+  }
+}
+
 output resourceGroupName string = resourceGroupName
 output resourceGroupId string = rg.id
 output apimGatewayUrl string = apim.outputs.gatewayUrl

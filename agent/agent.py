@@ -80,8 +80,14 @@ from agent_interface import AgentInterface
 
 load_dotenv()
 
-# Enable GenAI tracing before any OpenAI/Foundry client is constructed.
-os.environ["AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING"] = "true"
+# ponytail: GenAI tracing left OFF. azure-ai-projects 2.3.0 + opentelemetry
+# 1.40.0 crash with "'NonRecordingSpan' object has no attribute 'attributes'"
+# under concurrent multi-specialist fan-out, which _call_specialist's generic
+# except then reports to the user as "specialist unavailable". Token/cost
+# usage already reaches the run ledger via response.usage in Python, not via
+# these spans, so no governance data is lost by leaving this off. Revisit if
+# a fixed azure-ai-projects/opentelemetry pairing is confirmed.
+os.environ.setdefault("AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING", "false")
 
 _appinsights_conn = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
 if _appinsights_conn:

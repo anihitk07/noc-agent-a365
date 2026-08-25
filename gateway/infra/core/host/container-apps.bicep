@@ -335,6 +335,8 @@ resource adminUiApp 'Microsoft.App/containerApps@2024-10-02-preview' = if (admin
 
 output environmentId string = managedEnvironment.id
 output environmentName string = managedEnvironment.name
+output environmentDefaultDomain string = managedEnvironment.properties.defaultDomain
+output environmentStaticIp string = managedEnvironment.properties.staticIp
 output jobName string = jobName
 output adminUiName string = adminUiEnabled ? adminUiApp.name : ''
 output adminUiFqdn string = adminUiEnabled ? 'https://${adminUiApp!.properties.configuration.ingress.fqdn}' : ''
