@@ -27,7 +27,7 @@ DEFAULT_WORKSPACE_ID = "bc8bf4ca-439d-48f9-80dd-78131d30795a"  # logs-z4u5lniaf2
 
 _KQL = (
     "AppTraces | where Message == \"usage_event\" "
-    "| extend p = customDimensions "
+    "| extend p = parse_json(Properties) "
     "| project TimeGenerated, "
     "user_name = tostring(p.user_name), user_id = tostring(p.user_id), "
     "agent = tostring(p.agent), model = tostring(p.model), query = tostring(p.query), "
@@ -49,6 +49,14 @@ def query_events(cred, workspace_id: str, hours: int) -> list[dict]:
     return [dict(zip(cols, row)) for row in tables[0].rows]
 
 
+def read_pricing_safe(cred, cosmos_endpoint: str) -> dict:
+    try:
+        return read_pricing(cred, cosmos_endpoint)
+    except Exception as exc:  # noqa: BLE001 -- cost is a nice-to-have; show usage rows regardless
+        print(f"(pricing lookup failed, showing $0 cost: {exc})\n")
+        return {}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--workspace-id", default=DEFAULT_WORKSPACE_ID)
@@ -61,7 +69,7 @@ def main() -> int:
     if not events:
         print("No usage_event rows found in the window (check --hours, or that the agent has been called).")
         return 0
-    pricing = read_pricing(cred, args.cosmos_endpoint)
+    pricing = read_pricing_safe(cred, args.cosmos_endpoint)
 
     header = f"{'time':<20}{'user':<15}{'agent':<22}{'model':<15}{'in':>7}{'out':>7}{'cached':>8}{'reason':>8}{'cost_usd':>10}  query"
     print(header)
