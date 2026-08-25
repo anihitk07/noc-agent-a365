@@ -94,6 +94,12 @@ if _appinsights_conn:
     from azure.monitor.opentelemetry import configure_azure_monitor
 
     configure_azure_monitor(connection_string=_appinsights_conn)
+    # ponytail: configure_azure_monitor() already attaches a handler to the root
+    # logger, so the logging.basicConfig(level=...) below is a documented no-op
+    # (it only acts when root has zero handlers) -- root stays at the Python
+    # default WARNING, silently dropping every logger.info() call app-wide
+    # (including usage_event). Force INFO explicitly instead of relying on basicConfig.
+    logging.getLogger().setLevel(logging.INFO)
     logging.getLogger(__name__).info("📊 Tracing enabled → Application Insights")
 
 logging.basicConfig(level=logging.INFO)
