@@ -96,3 +96,69 @@ Ported from `C:\Flutter\apim-foundry-governance` into `gateway/infra` as a stand
 
 - No Azure deployment or live smoke test has been run yet; this pass only validates Bicep compilation and local XML structure.
 - `MODEL_PRICES_JSON` remains env-driven. Wiring the ledger directly to the existing Cosmos pricing document is still a small follow-up if we want to remove that duplication.
+
+## Live deployment (post-merge with `feat/foundry-multi-agent`)
+
+Deployed end-to-end to `rg-noc-iq-demo`. Real bugs found and fixed along the way (all
+committed on `feat/tokenops-gateway`): a `set-body` JSON-escaping bug, an invalid
+`context.Principal` reference (replaced with `output-token-variable-name` + `Jwt` claims
+lookup), `rewrite-uri`/`set-backend-service` used inside `<on-error>` (not allowed there),
+a base64 format mismatch between APIM's `validate-jwt` `<key>` (always base64-decodes) and
+the Python `RunTokenSigner` (fixed by base64-encoding the KV secret and decoding it in
+`run_ledger/main.py`), single-statement `if (...) return` inside `@{...}` blocks (APIM's
+Razor-like dialect requires braces), and an ambiguous `GetValueOrDefault` overload
+(needs a concretely-typed default). See git log on `feat/tokenops-gateway` for the individual
+fix commits.
+
+**Known APIM product limitation**: `azure-openai-token-limit` and `quota-by-key` cannot
+coexist in the same policy document on this APIM instance/SKU — combining them causes an
+unhandled 500 `InternalServerError` on policy PUT, independent of parameters, counter-key
+value, or element order (confirmed by isolated REST-API binary-search testing). Resolution:
+`quota-by-key` was dropped from `openai-pipeline.xml`; per-consumer governance is still
+covered by `azure-openai-token-limit` (TPM) plus the run ledger's run-scoped
+`llm-token-limit` and precall/postcall budget decisioning, which made the daily call-count
+quota redundant anyway.
+
+**New debugging method for stuck/opaque APIM policy deployments**: `az apim api policy show`
+and related `az apim` CLI-extension subcommands are broken in this environment
+(`No module named 'rpds.rpds'`), and `az rest` itself crashes on any response containing a
+UTF-8 BOM (a Windows colorama/console-encoding bug also seen with `az acr build` log output).
+Use `az account get-access-token` to mint a bearer token, then call the ARM/APIM REST API
+directly with PowerShell's `Invoke-RestMethod` (GET and PUT) — this fully bypasses both CLI
+bugs and lets you binary-search a policy document section-by-section against the live
+resource, far faster than round-tripping through full `az deployment sub create` cycles.
+
+### `b-toolbox-route` / `b-tool-caps` — spiked, not implemented
+
+The plan's own risk list (#7) called for spiking `b-toolbox-route` before committing to it,
+since it may involve streaming/SSE. That spike happened this session, by reading
+`agent/agent.py`'s current (post-`feat/foundry-multi-agent`-merge) design and the four IQ
+connection definitions (`infra/core/ai/ai-project.bicep`, `scripts/create_fabric_iq_connection.py`,
+`scripts/create_workiq_toolbox.py`). Finding, and why it changes the call:
+
+- Tool execution now happens **server-side inside Foundry Agent Service**, not in this app's
+  process. Each specialist Prompt Agent holds its own native `MCPTool(project_connection_id=...)`
+  pointed straight at a project Connection — there is no client-side MCP call left in
+  `agent.py` to route through APIM, and no toolbox layer at all (see the module docstring in
+  `agent/agent.py`).
+- The only remaining lever is a Connection's own `target` URL, which *could* be repointed at
+  an APIM-fronted proxy. But the four Connections use **three different, backend-specific
+  auth types** (`ProjectManagedIdentity` for Foundry IQ against Azure AI Search's own MCP
+  endpoint, `CustomKeys` for the external Web IQ vendor, `UserEntraToken` OBO passthrough for
+  Fabric IQ and Work IQ), and Agent Service mints/attaches those bearer tokens itself, scoped
+  to the **real** backend's audience, before the request ever reaches a proxy. Rehosting those
+  calls behind an APIM hostname risks breaking audience/issuer validation on the two
+  `UserEntraToken` surfaces and on Azure AI Search's own MI-token check — i.e. it can silently
+  break 3 of 4 already-working IQ tools on a demo that is currently deployed and functioning,
+  for governance value (call-count/audit visibility) that the LLM-side run ledger and
+  `azure-openai-token-limit`/run-scoped `llm-token-limit` already deliver for the cost
+  dimension that actually matters (token spend).
+- `b-tool-caps` (oversized tool-output capping, malformed-call halting) depends on
+  `b-toolbox-route` existing first and adds MCP JSON-RPC/SSE body parsing on top, which is
+  its own separate risk the plan flagged.
+
+**Decision**: leave both undone. If per-tool spend/audit visibility becomes a real
+requirement later, the safer path is instrumenting `agent.py`'s specialist call sites
+(before/after each `get_openai_client(agent_name=...)` call) to log to the run ledger
+directly — no proxy, no audience-validation risk — rather than intercepting Agent Service's
+own outbound Connection traffic.
