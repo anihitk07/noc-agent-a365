@@ -162,3 +162,37 @@ requirement later, the safer path is instrumenting `agent.py`'s specialist call 
 (before/after each `get_openai_client(agent_name=...)` call) to log to the run ledger
 directly — no proxy, no audience-validation risk — rather than intercepting Agent Service's
 own outbound Connection traffic.
+
+## Responses API fix + final mixed-routing decision (this pass)
+
+Two more real bugs found while trying to actually wire App Service through APIM for smoke
+testing, plus a scope decision that follows directly from the `b-toolbox-route` finding
+above:
+
+- **`openai-pipeline.xml`/`foundry-pipeline.xml` were written for Chat Completions, but
+  `agent.py` calls the Responses API.** The precall token-estimate (`b["messages"]`), the
+  postcall usage read (`u["prompt_tokens"]`/`u["completion_tokens"]`), and the mutate block's
+  message-injection (`((JArray)b["messages"]).Add(...)`) all assumed a `messages` array and
+  Chat-Completions usage field names that don't exist on a `responses.create()` body/response.
+  Fixed with defensive dual-shape handling (`b["input"] ?? b["messages"]`,
+  `u["input_tokens"] ?? u["prompt_tokens"]`, etc.) so either shape works.
+- **The run ledger's Container App has internal-only ingress** (confirmed via
+  `az containerapp show`) — App Service is not VNet-integrated, so it cannot reach it
+  directly. Added a thin pass-through API (`run-ledger-gateway`, path `/ledger`) to
+  `apim.bicep`: no body inspection, just `set-backend-service` to the internal ledger FQDN,
+  since APIM already sits in the VNet.
+- **Final decision, consistent with the `b-toolbox-route` spike above**: this app's own
+  model/agent traffic (orchestrator + all 4 specialists) keeps calling Foundry **directly**,
+  never through `openai-gateway`/`foundry-gateway` — those two blockers (OAuth passthrough
+  substitution, persisted-agent body shape mismatch) apply to this app's SDK-level calls just
+  as much as they applied to the toolbox MCP calls. Instead, `agent.py` calls the run ledger's
+  `/v1/precall` and `/v1/postcall` directly (via the new `/ledger` APIM pass-through), using
+  the real `response.usage`/`response.usage_details` each call already returns. This answers
+  "how is fabric_iq/work_iq governed if it doesn't cross APIM?" uniformly for all 5 model
+  calls: the OAuth-identity-passthrough question and the token-governance-reporting question
+  are orthogonal, and only the latter needed APIM (as a private-network relay, not a policy
+  enforcement point) at all. See `docs/SEQUENCE.md` §3 for the full sequence diagram.
+- `openai-gateway`/`foundry-gateway` stay deployed, fixed, and available for any *other*
+  direct AOAI/Foundry caller that sends REST-shaped, model-in-body traffic — just not in this
+  app's own hot path.
+

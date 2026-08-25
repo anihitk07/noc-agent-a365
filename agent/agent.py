@@ -219,6 +219,112 @@ def _run_ledger_base_url() -> str:
     return os.getenv("RUN_LEDGER_BASE_URL", "").strip().rstrip("/")
 
 
+def _run_ledger_subscription_key() -> str:
+    """Ocp-Apim-Subscription-Key for the APIM `/ledger` pass-through API.
+
+    The run-ledger Container App has internal-only ingress (VNet-reachable
+    only); App Service is not VNet-integrated, so RUN_LEDGER_BASE_URL points
+    at the APIM gateway's `/ledger` path (see gateway/infra/core/apim/apim.bicep
+    `runLedgerApi`), which requires this key when clientAuthMode=subscription-key.
+    """
+    return os.getenv("RUN_LEDGER_SUBSCRIPTION_KEY", "").strip()
+
+
+def _run_ledger_headers() -> dict[str, str]:
+    key = _run_ledger_subscription_key()
+    return {"Ocp-Apim-Subscription-Key": key} if key else {}
+
+
+class _RunHaltedError(Exception):
+    """Raised when the run ledger's precall decision is halt/queue.
+
+    Mirrors the shape `_extract_run_halt_reason` already knows how to read
+    off an HTTP 403/429 (the APIM-side halt path for any traffic that DOES
+    cross the gateway); this is the same signal, raised directly, for calls
+    this app makes straight to the run ledger's `/v1/precall` API.
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+async def _run_ledger_precall(
+    run_id: str, agent_name: str, step: str, model: str, est_input_tokens: int, max_output_tokens: int = 1024,
+) -> Optional[dict]:
+    """Best-effort precall decision from the run ledger. Returns None (== "allow, no
+    ledger opinion") if the ledger is unreachable/unconfigured -- never blocks a turn
+    on ledger availability by itself.
+    """
+    base_url = _run_ledger_base_url()
+    if not base_url:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=_run_ledger_timeout_seconds()) as client:
+            response = await client.post(
+                f"{base_url}/v1/precall",
+                headers=_run_ledger_headers(),
+                json={
+                    "run_id": run_id,
+                    "agent": agent_name,
+                    "step": step,
+                    "model": model,
+                    "est_input_tokens": max(0, est_input_tokens),
+                    "max_output_tokens": max_output_tokens,
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as exc:  # noqa: BLE001 -- best-effort only, never break the turn
+        logger.warning("⚠️ Run ledger precall unavailable, continuing without a decision: %s", exc)
+        return None
+
+
+async def _run_ledger_postcall(
+    run_id: str,
+    reservation_id: Optional[str],
+    model: str = "",
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    failed: bool = False,
+) -> None:
+    """Best-effort postcall usage report. Fire-and-forget from the caller's point of
+    view (never raises) -- a missed postcall degrades run-ledger accuracy, not the turn.
+    """
+    base_url = _run_ledger_base_url()
+    if not base_url:
+        return
+    payload: dict = {"run_id": run_id, "reservation_id": reservation_id}
+    if failed:
+        payload["failed"] = True
+    else:
+        payload.update({"input_tokens": input_tokens, "output_tokens": output_tokens, "model": model})
+    try:
+        async with httpx.AsyncClient(timeout=_run_ledger_timeout_seconds()) as client:
+            response = await client.post(
+                f"{base_url}/v1/postcall", headers=_run_ledger_headers(), json=payload
+            )
+            response.raise_for_status()
+    except Exception as exc:  # noqa: BLE001 -- best-effort only, never break the turn
+        logger.warning("⚠️ Run ledger postcall failed (best-effort only): %s", exc)
+
+
+def _apply_precall_decision(decision: Optional[dict]) -> Optional[str]:
+    """Translate a precall decision into either None (proceed) or a reservation id
+    to use, raising `_RunHaltedError` for halt/queue. Kept separate from the mutate
+    (max_output_tokens override) handling so callers that can't honor a mutate still
+    get the halt/queue enforcement.
+    """
+    if not decision:
+        return None
+    action = decision.get("action")
+    if action == "halt":
+        raise _RunHaltedError(decision.get("halt_reason") or "Run budget or policy exhausted.")
+    if action == "queue":
+        raise _RunHaltedError("Run concurrency cap reached. Please retry shortly.")
+    return decision.get("reservation_id")
+
+
 def _run_ledger_timeout_seconds() -> float:
     try:
         return float(os.getenv("RUN_LEDGER_CREATE_TIMEOUT_SECONDS", "2.0"))
@@ -285,6 +391,8 @@ def _extract_http_error_details(exc: BaseException) -> tuple[int, dict[str, str]
 
 
 def _extract_run_halt_reason(exc: BaseException) -> Optional[str]:
+    if isinstance(exc, _RunHaltedError):
+        return exc.reason
     details = _extract_http_error_details(exc)
     if details is None:
         return None
@@ -451,6 +559,9 @@ _pending_consent: contextvars.ContextVar[Optional[tuple[str, str]]] = contextvar
 _current_run_token: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "_current_run_token", default=None
 )
+_current_run_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "_current_run_id", default=None
+)
 _next_run_step: contextvars.ContextVar[Optional[Callable[[], str]]] = contextvars.ContextVar(
     "_next_run_step", default=None
 )
@@ -581,6 +692,7 @@ class NocAgent(AgentInterface):
             async with httpx.AsyncClient(timeout=_run_ledger_timeout_seconds()) as client:
                 response = await client.post(
                     f"{base_url}/v1/runs",
+                    headers=_run_ledger_headers(),
                     json={
                         "run_id": self._get_or_create_run_id(conversation_id, activity_id),
                         "budget_micros": _run_ledger_budget_micros(),
@@ -633,6 +745,15 @@ class NocAgent(AgentInterface):
         (cheap -- no network round trip at construction) so each specialist
         call carries the right identity for THIS turn/user, never a stale one
         from a previous turn.
+
+        Token governance: all 4 specialists call Foundry directly (never through
+        APIM -- routing fabric_iq/work_iq's OAuth-identity-passthrough calls
+        through a gateway that substitutes its own managed identity would break
+        Agent Service's per-user consent attribution). So this app reports usage
+        to the run ledger directly instead, uniformly for all 4 specialists,
+        using the SDK-level `response.usage` this call already gets back --
+        the same precall/postcall contract APIM's own policies use, just made
+        from Python rather than from policy XML. See docs/SEQUENCE.md.
         """
         agent_name = self._available_agents[key]
         _, needs_user_identity = SPECIALIST_AGENTS[key]
@@ -646,28 +767,58 @@ class NocAgent(AgentInterface):
         else:
             credential = self._service_credential
 
+        run_id = _current_run_id.get()
+        run_token = _current_run_token.get()
+        next_step = _next_run_step.get()
+        step = next_step() if next_step else None
+        reservation_id: Optional[str] = None
+        max_output_tokens: Optional[int] = None  # None == leave the agent's own default alone
+        if run_id:
+            decision = await _run_ledger_precall(
+                run_id=run_id,
+                agent_name=agent_name.removesuffix("-agent"),
+                step=step or "0",
+                model=agent_name,
+                est_input_tokens=len(question) // 4,
+                max_output_tokens=1024,  # advisory ceiling offered to the ledger's decision, not applied unless it mutates
+            )
+            reservation_id = _apply_precall_decision(decision)  # raises _RunHaltedError on halt/queue
+            if decision and decision.get("action") == "mutate" and decision.get("max_output_tokens"):
+                max_output_tokens = int(decision["max_output_tokens"])
+
         project_client = AIProjectClient(endpoint=PROJECT_ENDPOINT, credential=credential, allow_preview=True)
         try:
             openai_client = project_client.get_openai_client(agent_name=agent_name)
-            run_token = _current_run_token.get()
-            next_step = _next_run_step.get()
             extra_headers = (
-                _build_run_headers(run_token, next_step(), agent_name.removesuffix("-agent"))
-                if run_token and next_step
+                _build_run_headers(run_token, step, agent_name.removesuffix("-agent"))
+                if run_token and step
                 else None
             )
-            response = await asyncio.to_thread(
-                openai_client.responses.create,
-                input=question,
-                extra_headers=extra_headers,
-            )
+            create_kwargs: dict = {"input": question, "extra_headers": extra_headers}
+            if max_output_tokens is not None:
+                # Only set when the run ledger has actually asked for a steer-down --
+                # never impose a default cap that the agent didn't have before.
+                create_kwargs["max_output_tokens"] = max_output_tokens
+            response = await asyncio.to_thread(openai_client.responses.create, **create_kwargs)
         except Exception as exc:  # noqa: BLE001 -- degrade this one specialist call, not the whole turn
+            if run_id:
+                await _run_ledger_postcall(run_id, reservation_id, failed=True)
             if _extract_run_halt_reason(exc):
                 raise
             logger.error("❌ Specialist '%s' call failed: %s", agent_name, exc, exc_info=True)
             return f"({agent_name} is currently unavailable: {exc})"
         finally:
             project_client.close()
+
+        if run_id:
+            usage = getattr(response, "usage", None)
+            await _run_ledger_postcall(
+                run_id,
+                reservation_id,
+                model=getattr(response, "model", agent_name) or agent_name,
+                input_tokens=getattr(usage, "input_tokens", 0) or 0,
+                output_tokens=getattr(usage, "output_tokens", 0) or 0,
+            )
 
         consent_url = _extract_oauth_consent_url(response)
         if consent_url:
@@ -700,6 +851,7 @@ class NocAgent(AgentInterface):
         conversation = getattr(context.activity, "conversation", None)
         conversation_id = getattr(conversation, "id", "") or user_id
         activity_id = getattr(context.activity, "id", "") or str(len(history))
+        run_id = self._get_or_create_run_id(conversation_id, activity_id)
         run_token = await self._get_or_create_run_token(conversation_id, activity_id)
         step_counter = {"value": 0}
 
@@ -714,8 +866,40 @@ class NocAgent(AgentInterface):
             _current_user_token.set(foundry_user_token)
             _pending_consent.set(None)
             _current_run_token.set(run_token)
+            _current_run_id.set(run_id if run_token else None)
             _next_run_step.set(_next_step if run_token else None)
-            return await self._agent.run(history)
+
+            # Orchestrator's own model call: same direct-to-ledger governance as
+            # each specialist (see _call_specialist docstring) -- not routed
+            # through APIM, reported to the run ledger directly instead.
+            reservation_id: Optional[str] = None
+            step = _next_step() if run_token else None
+            if run_token:
+                est_input_tokens = sum(len(str(getattr(m, "contents", m))) for m in history) // 4
+                decision = await _run_ledger_precall(
+                    run_id=run_id,
+                    agent_name=RUN_LEDGER_AGENT_NAME,
+                    step=step or "0",
+                    model=MODEL_DEPLOYMENT_NAME,
+                    est_input_tokens=est_input_tokens,
+                )
+                reservation_id = _apply_precall_decision(decision)  # raises _RunHaltedError on halt/queue
+            try:
+                result = await self._agent.run(history)
+            except Exception:
+                if run_token:
+                    await _run_ledger_postcall(run_id, reservation_id, failed=True)
+                raise
+            if run_token:
+                usage = getattr(result, "usage_details", None) or {}
+                await _run_ledger_postcall(
+                    run_id,
+                    reservation_id,
+                    model=MODEL_DEPLOYMENT_NAME,
+                    input_tokens=usage.get("input_token_count") or 0,
+                    output_tokens=usage.get("output_token_count") or 0,
+                )
+            return result
 
         run_task = asyncio.ensure_future(_run_turn())
         try:

@@ -261,6 +261,50 @@ resource openAiApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   }
 }
 
+resource runLedgerApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
+  parent: apim
+  name: 'run-ledger-gateway'
+  properties: {
+    // ponytail: the run-ledger Container App is internal-ingress-only (VNet-reachable only).
+    // App Service is not VNet-integrated, so it cannot call it directly; this API is a thin
+    // pass-through that lets App Service reach the ledger via APIM, which already sits in
+    // the VNet. This app's model/agent traffic itself stays direct to Foundry (see
+    // gateway/PORTING_NOTES.md) - only the ledger precall/postcall/run-mint calls route here.
+    path: 'ledger'
+    displayName: 'Run ledger gateway'
+    format: 'openapi+json'
+    value: '{"openapi":"3.0.1","info":{"title":"Run ledger proxy","version":"1.0.0"},"paths":{"/v1/runs":{"post":{"responses":{"200":{"description":"OK"}}}},"/v1/precall":{"post":{"responses":{"200":{"description":"OK"}}}},"/v1/postcall":{"post":{"responses":{"200":{"description":"OK"}}}}}}'
+    protocols: [
+      'https'
+    ]
+    subscriptionRequired: clientAuthMode == 'subscription-key'
+  }
+}
+
+resource runLedgerApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' = {
+  parent: runLedgerApi
+  name: 'policy'
+  properties: {
+    format: 'xml'
+    value: '<policies><inbound><base />${jwtBlock}<set-backend-service base-url="${runLedgerBaseUrl}" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+  }
+}
+
+resource runLedgerDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2024-05-01' = {
+  parent: runLedgerApi
+  name: 'applicationinsights'
+  properties: {
+    loggerId: appInsightsLogger.id
+    sampling: {
+      samplingType: 'fixed'
+      percentage: 100
+    }
+    metrics: true
+    verbosity: 'information'
+    httpCorrelationProtocol: 'W3C'
+  }
+}
+
 resource foundryApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   parent: apim
   name: 'foundry-gateway'
@@ -416,8 +460,32 @@ resource foundryUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   }
 }
 
+// ponytail: allApis subscription so App Service (the only intended caller today) can present
+// an Ocp-Apim-Subscription-Key under clientAuthMode=subscription-key. Its key is written into
+// the existing Key Vault so it never needs to be pasted into an app setting by hand.
+resource appServiceSubscription 'Microsoft.ApiManagement/service/subscriptions@2024-05-01' = {
+  parent: apim
+  name: 'noc-app-service'
+  properties: {
+    displayName: 'noc-app-service'
+    scope: '/apis'
+    state: 'active'
+    allowTracing: false
+  }
+}
+
+resource appServiceSubscriptionKeySecret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = {
+  parent: keyVault
+  name: 'apim-app-service-subscription-key'
+  properties: {
+    value: appServiceSubscription.listSecrets().primaryKey
+  }
+}
+
 output apimId string = apim.id
 output apimName string = apim.name
 output gatewayUrl string = 'https://${apim.name}.azure-api.net'
+output ledgerGatewayUrl string = 'https://${apim.name}.azure-api.net/ledger'
+output appServiceSubscriptionKeySecretUri string = appServiceSubscriptionKeySecret.properties.secretUri
 output privateIpAddress string = !empty(apim.properties.privateIPAddresses) ? apim.properties.privateIPAddresses[0] : ''
 output identityPrincipalId string = apim.identity.principalId

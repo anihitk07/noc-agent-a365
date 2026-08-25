@@ -27,15 +27,20 @@
         <value>application/json</value>
       </set-header>
       <set-body>@{
+        // ponytail: this app calls the Responses API (body has "input", not "messages";
+        // "max_output_tokens", not "max_tokens"). Both field shapes are handled so a
+        // Chat-Completions caller of this same gateway API keeps working too.
         var b = (JObject)context.Variables[&quot;body&quot;];
+        var promptSrc = (JToken)(b[&quot;input&quot;] ?? b[&quot;messages&quot;]);
+        var promptText = promptSrc == null ? &quot;&quot; : (promptSrc.Type == JTokenType.String ? (string)promptSrc : promptSrc.ToString());
         return new JObject(
           new JProperty(&quot;run_id&quot;, (string)context.Variables[&quot;runId&quot;]),
           new JProperty(&quot;agent&quot;, context.Request.Headers.GetValueOrDefault(&quot;x-agent&quot;,&quot;unknown&quot;)),
           new JProperty(&quot;step&quot;, context.Request.Headers.GetValueOrDefault(&quot;x-step&quot;,&quot;0&quot;)),
           new JProperty(&quot;model&quot;, (string)b[&quot;model&quot;]),
-          new JProperty(&quot;est_input_tokens&quot;, b[&quot;messages&quot;].ToString().Length / 4),
-          new JProperty(&quot;max_output_tokens&quot;, (int?)b[&quot;max_tokens&quot;] ?? 1024),
-          new JProperty(&quot;prompt_hash&quot;, (b[&quot;messages&quot;].ToString()).GetHashCode().ToString())
+          new JProperty(&quot;est_input_tokens&quot;, promptText.Length / 4),
+          new JProperty(&quot;max_output_tokens&quot;, (int?)b[&quot;max_output_tokens&quot;] ?? (int?)b[&quot;max_tokens&quot;] ?? 1024),
+          new JProperty(&quot;prompt_hash&quot;, promptText.GetHashCode().ToString())
         ).ToString();
       }</set-body>
     </send-request>
@@ -68,13 +73,24 @@
           var b = (JObject)context.Variables[&quot;body&quot;];
           var d = (JObject)context.Variables[&quot;d&quot;];
           if (d[&quot;model_override&quot;] != null)  { b[&quot;model&quot;] = (string)d[&quot;model_override&quot;]; }
-          if (d[&quot;max_output_tokens&quot;] != null) { b[&quot;max_tokens&quot;] = (int)d[&quot;max_output_tokens&quot;]; }
-          if (d[&quot;inject&quot;] != null) {
-            ((JArray)b[&quot;messages&quot;]).Add(new JObject(
-              new JProperty(&quot;role&quot;,&quot;system&quot;),
-              new JProperty(&quot;content&quot;,(string)d[&quot;inject&quot;])));
+          if (d[&quot;max_output_tokens&quot;] != null) {
+            if (b[&quot;input&quot;] != null) { b[&quot;max_output_tokens&quot;] = (int)d[&quot;max_output_tokens&quot;]; }
+            else { b[&quot;max_tokens&quot;] = (int)d[&quot;max_output_tokens&quot;]; }
           }
-          if ((bool?)b[&quot;stream&quot;] == true) {
+          if (d[&quot;inject&quot;] != null) {
+            if (b[&quot;messages&quot;] is JArray messagesArr) {
+              messagesArr.Add(new JObject(
+                new JProperty(&quot;role&quot;,&quot;system&quot;),
+                new JProperty(&quot;content&quot;,(string)d[&quot;inject&quot;])));
+            } else if (b[&quot;input&quot;] != null) {
+              // ponytail: Responses API "input" is commonly a plain string (this app sends a
+              // question string, not a role/content array) - fold the injected steer text in
+              // rather than assuming it is a JArray.
+              var existing = b[&quot;input&quot;].Type == JTokenType.String ? (string)b[&quot;input&quot;] : b[&quot;input&quot;].ToString();
+              b[&quot;input&quot;] = existing + &quot;\n\n[system]: &quot; + (string)d[&quot;inject&quot;];
+            }
+          }
+          if ((bool?)b[&quot;stream&quot;] == true &amp;&amp; b[&quot;messages&quot;] != null) {
             b[&quot;stream_options&quot;] = new JObject(new JProperty(&quot;include_usage&quot;, true));
           }
           return b.ToString();
@@ -172,8 +188,8 @@
         return new JObject(
           new JProperty(&quot;run_id&quot;, (string)context.Variables[&quot;runId&quot;]),
           new JProperty(&quot;reservation_id&quot;, (string)context.Variables[&quot;reservationId&quot;]),
-          new JProperty(&quot;input_tokens&quot;,  (int?)u?[&quot;prompt_tokens&quot;] ?? 0),
-          new JProperty(&quot;output_tokens&quot;, (int?)u?[&quot;completion_tokens&quot;] ?? 0),
+          new JProperty(&quot;input_tokens&quot;,  (int?)u?[&quot;input_tokens&quot;] ?? (int?)u?[&quot;prompt_tokens&quot;] ?? 0),
+          new JProperty(&quot;output_tokens&quot;, (int?)u?[&quot;output_tokens&quot;] ?? (int?)u?[&quot;completion_tokens&quot;] ?? 0),
           new JProperty(&quot;model&quot;, (string)r[&quot;model&quot;])
         ).ToString();
       }</set-body>
