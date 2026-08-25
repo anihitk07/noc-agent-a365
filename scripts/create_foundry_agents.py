@@ -1,4 +1,4 @@
-"""Provision the 4 persisted Foundry Prompt Agents for the multi-agent design.
+"""Provision the 5 persisted Foundry Prompt Agents for the multi-agent design.
 
 Each Prompt Agent replaces one leg of the old shared "noc-iq-toolbox" with a
 single native `MCPTool(project_connection_id=...)` baked directly into the
@@ -23,6 +23,7 @@ rg-noc-iq-demo -- see agent/.env.template):
   FABRIC_IQ_CONNECTION_NAME (default fabric-iq-connection)
   WEB_IQ_CONNECTION_NAME (default web-iq-connection)
   WORK_IQ_CONNECTION_NAME (default WorkIQ)
+  FABRIC_RTI_MCP_URL, FABRIC_RTI_CONNECTION_ID
 """
 
 import os
@@ -47,6 +48,7 @@ class SpecialistSpec:
     default_connection_name: str
     server_label: str
     instructions: str
+    server_url_env: Optional[str] = None
 
 
 SPECIALISTS = [
@@ -114,6 +116,24 @@ SPECIALISTS = [
             "failing silently."
         ),
     ),
+    SpecialistSpec(
+        agent_name="noc-incident-agent",
+        connection_env="FABRIC_RTI_CONNECTION_ID",
+        default_connection_name="",
+        server_label="fabric-rti",
+        instructions=(
+            "You are the Fabric RTI incident-telemetry specialist for a telecom NOC/NOA "
+            "operations team. Use the Fabric Eventhouse KQL data exposed by your MCP tool "
+            "to answer what actually happened during a network incident using only these "
+            "tables: OpticalTelemetry (sensor power/BER/utilization readings), "
+            "NetworkAlerts (alert severity, suppression, acknowledgement timing), and "
+            "IncidentEvents (detected/acknowledged/escalated/resolved lifecycle events). "
+            "Always state the exact time window your answer covers. Never invent or "
+            "estimate a reading you did not actually query; if the Eventhouse has no data "
+            "for the requested window or entity, say so plainly."
+        ),
+        server_url_env="FABRIC_RTI_MCP_URL",
+    ),
 ]
 
 
@@ -121,7 +141,9 @@ def log(message: str) -> None:
     print(message, flush=True)
 
 
-def _definition_matches(existing, model: str, instructions: str, connection_id: str) -> bool:
+def _definition_matches(
+    existing, model: str, instructions: str, connection_id: str, server_url: str
+) -> bool:
     """True if the live agent's latest version already matches what we'd create.
 
     `AgentDetails` (returned by `project.agents.get()`) has no top-level
@@ -136,15 +158,22 @@ def _definition_matches(existing, model: str, instructions: str, connection_id: 
     return any(
         t.get("type") == "mcp"
         and t.get("project_connection_id") == connection_id
-        and t.get("server_url")
+        and t.get("server_url") == server_url
         for t in tools
     )
 
 
 def ensure_specialist_agent(project: AIProjectClient, model: str, spec: SpecialistSpec) -> None:
-    connection_name = os.getenv(spec.connection_env, spec.default_connection_name)
-    connection = project.connections.get(connection_name, include_credentials=False)
-    log(f"  connection '{connection_name}' -> {connection.id}")
+    if spec.server_url_env:
+        connection_id = os.environ[spec.connection_env]
+        server_url = os.environ[spec.server_url_env]
+        log(f"  direct MCP connection -> {connection_id}")
+    else:
+        connection_name = os.getenv(spec.connection_env, spec.default_connection_name)
+        connection = project.connections.get(connection_name, include_credentials=False)
+        connection_id = connection.id
+        server_url = connection.target
+        log(f"  connection '{connection_name}' -> {connection_id}")
 
     definition = PromptAgentDefinition(
         model=model,
@@ -152,8 +181,8 @@ def ensure_specialist_agent(project: AIProjectClient, model: str, spec: Speciali
         tools=[
             MCPTool(
                 server_label=spec.server_label,
-                server_url=connection.target,
-                project_connection_id=connection.id,
+                server_url=server_url,
+                project_connection_id=connection_id,
                 require_approval="never",
             )
         ],
@@ -161,7 +190,7 @@ def ensure_specialist_agent(project: AIProjectClient, model: str, spec: Speciali
 
     try:
         existing = project.agents.get(spec.agent_name)
-        if _definition_matches(existing, model, spec.instructions, connection.id):
+        if _definition_matches(existing, model, spec.instructions, connection_id, server_url):
             latest_version = ((existing.versions or {}).get("latest") or {}).get("version", "?")
             log(f"[OK] '{spec.agent_name}' already up to date (v{latest_version}) -- skipping")
             return

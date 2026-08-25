@@ -269,7 +269,19 @@ here since they were silent (no error at request time):
 |---|---|---|
 | `gh repo clone microsoft/...` or GitHub MCP tools fail with `GraphQL: Resource protected by organization SAML enforcement` | The `microsoft` org enforces SAML SSO on the GitHub App token used by `gh`/MCP | Use a plain `git clone https://github.com/microsoft/<repo>.git` instead — works for public repos without hitting the SAML gate. |
 
-## Outbound email-trigger notification bugs (found during live e2e testing, all fixed)
+## Fabric RTI incident-agent: Foundry Toolbox spike result (B2-c)
+
+Spiked whether a persisted Foundry **Prompt Agent** can point its `MCPTool` at
+a **Toolbox's** combined MCP endpoint (`{PROJECT_ENDPOINT}/toolboxes/{name}/versions/{v}/mcp`)
+instead of a raw MCP server, ahead of adding `noc-incident-agent` over the new
+Fabric Eventhouse. Outcome: **B2-c — not attachable.**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Throwaway toolbox wrapping `fabric-iq-connection` answered `tools/list` directly (200, with an `ai.azure.com` bearer token) | The toolbox's own MCP endpoint is fine in isolation | n/a — confirms the toolbox itself isn't broken |
+| A throwaway Prompt Agent whose `MCPTool.server_url` pointed at that toolbox endpoint failed every call with `tool_user_error` → inner `401 PermissionDenied` (both under the app's default credential and under `_StaticTokenCredential` OBO injection) | `PromptAgentDefinition` only supports `tools: list[Tool]` — a Prompt Agent's own `MCPTool` cannot authenticate to a Toolbox's MCP endpoint at all, so OBO passthrough through that hop was never reachable to test | **Decision: skip the toolbox layer for `noc-incident-agent`.** It gets a direct `MCPTool(server_url=FABRIC_RTI_MCP_URL, project_connection_id=<fabric-rti-connection>)`, identical in shape to the existing `fabric_iq`/`work_iq` specialists. `scripts/create_rti_toolbox.py` (if written) stays in the repo unused/unwired, in case a future SDK version adds toolbox support to `PromptAgentDefinition`. |
+
+
 
 See `docs/OUTBOUND_NOTIFICATIONS.md`'s "Live E2E test results" section for
 full detail and the Accenture-facing writeup. Summary table:
@@ -334,6 +346,26 @@ the prior session's primer.
 | `check_usage.py` shows `No usage rows found` even after a real specialist-routed turn | **By design, not a bug.** `check_usage.py`'s `_USAGE_KQL` reads `AppMetrics` rows named `"Prompt Tokens"/"Completion Tokens"`, which APIM's `azure-openai-token-limit` policy only emits for traffic that actually flows through the `openai-gateway`/`foundry-gateway` APIs. Per `gateway/PORTING_NOTES.md`'s "final mixed-routing decision", this app's own agent/model traffic **always bypasses APIM** and calls Foundry directly — those two APIs exist for *other* direct AOAI/Foundry callers, not this app's hot path. `check_usage.py` will correctly show `$0`/nothing for this app forever; that's expected. |
 | `check_usage_detail.py` is the correct tool for this app | It reads the `usage_event` AppTraces rows agent.py emits per specialist call — confirmed live with 4 real requests across all 4 specialists (`noc-knowledge-agent`, `noc-comms-agent`, `noc-threatintel-agent`), real token counts (e.g. 17307 in / 3769 out on one `gpt-5.4` call). |
 | `cost_usd` still shows `0.00000` for these live rows | Same pre-existing, already-documented Cosmos private-endpoint restriction above — pricing lookup 403s from a laptop's public IP. Usage/token data itself is fully verified end-to-end; only the local `$` rendering needs a VNet-internal caller (e.g. exec into `ca-adminui-aigw-dev-eus2`). |
+
+## noc-incident-agent (RTI) live verification — partial, pending a real Teams turn
+
+Everything server-side is deployed and provisioned this session: Fabric
+Eventhouse + KQL database seeded (413,658 `OpticalTelemetry` rows, 8,747
+`NetworkAlerts` rows, 69 `IncidentEvents` rows), `fabric-rti-connection`
+project connection, `noc-incident-agent` Prompt Agent (single direct
+`MCPTool`, no toolbox per the B2-c spike above), `agent.py` wired with the
+5th `SPECIALIST_AGENTS` entry, `ORCHESTRATOR_INSTRUCTIONS` updated, and the
+app redeployed to App Service (`azd deploy web`, health check `200`).
+
+| Attempted | Result |
+|---|---|
+| Direct `Foundry-MCP-agent_invoke` of `noc-incident-agent` from this session's own identity, bypassing Teams entirely, to sanity-check the Eventhouse chain works | `403 Forbidden` — `does not have permissions for .../agents/read actions`. This identity isn't the Teams-user OBO principal nor the App Service's own managed identity, so this failure is expected and unrelated to the new wiring; it isn't a substitute for a real Teams-routed turn anyway (it would exercise the agent identity, not the OBO/run-ledger/`usage_event` path). |
+| Real Teams turn routed to `ask_incident_agent`, followed by `check_usage_detail.py` to confirm a `usage_event` row for `noc-incident-agent` and a real Eventhouse-grounded answer | **Not yet done.** Needs a human to send a Teams message (e.g. "what was the alert timeline and detection-to-ack latency for the MEL-BNE fibre link?") to the deployed bot. This is the same pattern used to verify the other 4 specialists earlier this session — requires an actual Teams client, which wasn't available at this point in the session. |
+
+**Next step, unchanged from the plan:** send a real Teams turn, then run
+`check_usage_detail.py --hours 1` and confirm a `noc-incident-agent` row with
+non-zero tokens, and confirm the reply cites real alert/telemetry rows rather
+than declining or hallucinating.
 
 ## Bicep/live-state reconciliation (this session)
 

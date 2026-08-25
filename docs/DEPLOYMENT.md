@@ -216,6 +216,24 @@ After running it, **restart the app** (`az webapp restart`) so `agent.py`'s
 `initialize()` re-reads the connections and rebuilds the toolbox with all 4
 tools -- it only resolves connections once, at process startup.
 
+### 4d. Grant Teams users Fabric workspace/Eventhouse read access (required for `noc-incident-agent`)
+
+`noc-incident-agent` uses the same per-user OBO identity passthrough pattern
+as the other Fabric-backed specialists (`needs_user_identity=True` in
+`agent/agent.py`), so the calling Teams user's own Fabric permissions are
+what Eventhouse enforces at query time. The Foundry project role assignments
+above (for example `Foundry Agent Consumer`) are **not** enough on their own:
+after deployment, a Fabric admin must also grant each Teams user -- or, more
+typically, an AAD group they belong to -- at least **Viewer** (or the
+equivalent read role your tenant uses) on the Fabric workspace that contains
+the Eventhouse/item the agent queries.
+
+Do this in the Fabric portal (**Workspace -> Manage access**) or via the
+Fabric REST API's workspace/item role-assignment endpoints. This is a
+separate, manual post-deployment step -- Fabric permissions are not currently
+ARM/Bicep-managed, so they are intentionally not granted by any file under
+`infra/`.
+
 ## 5. Web IQ
 
 Provisioned automatically by Bicep if `webIqApiKey` was set in step 2 -- no

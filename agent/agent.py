@@ -120,8 +120,9 @@ KNOWLEDGE_AGENT_NAME = os.getenv("NOC_KNOWLEDGE_AGENT_NAME", "noc-knowledge-agen
 TOPOLOGY_AGENT_NAME = os.getenv("NOC_TOPOLOGY_AGENT_NAME", "noc-topology-agent")
 THREATINTEL_AGENT_NAME = os.getenv("NOC_THREATINTEL_AGENT_NAME", "noc-threatintel-agent")
 COMMS_AGENT_NAME = os.getenv("NOC_COMMS_AGENT_NAME", "noc-comms-agent")
+INCIDENT_AGENT_NAME = os.getenv("NOC_INCIDENT_AGENT_NAME", "noc-incident-agent")
 
-# fabric_iq/work_iq require the CALLING USER's OBO token (UserEntraToken
+# fabric_iq/work_iq/rti_iq require the CALLING USER's OBO token (UserEntraToken
 # identity passthrough); foundry_iq/web_iq use the app's own service
 # credential. See module docstring "What changed with persisted Prompt Agents".
 SPECIALIST_AGENTS: dict[str, tuple[str, bool]] = {
@@ -129,6 +130,7 @@ SPECIALIST_AGENTS: dict[str, tuple[str, bool]] = {
     "fabric_iq": (TOPOLOGY_AGENT_NAME, True),
     "web_iq": (THREATINTEL_AGENT_NAME, False),
     "work_iq": (COMMS_AGENT_NAME, True),
+    "rti_iq": (INCIDENT_AGENT_NAME, True),
 }
 RUN_LEDGER_AGENT_NAME = "noc-agent"
 
@@ -152,7 +154,7 @@ AGENT_RUN_TIMEOUT_SECONDS = float(os.getenv("AGENT_RUN_TIMEOUT_SECONDS", "90"))
 
 ORCHESTRATOR_INSTRUCTIONS = """You are the NOC/NOA network operations orchestrator for a
 telecom provider. You help on-call engineers triage incidents such as fibre cuts, router
-failures, and amplifier faults by delegating to four specialist agents. Call as many of them
+failures, and amplifier faults by delegating to five specialist agents. Call as many of them
 as the question needs, in any order, and synthesize their answers yourself -- each specialist
 only sees the single question you send it, not the rest of the conversation.
 
@@ -183,12 +185,21 @@ Delegate as follows:
   roster, pending change approvals. Use it to answer "who is on-call", "what's being discussed
   on the incident bridge", or to draft a status update. If it requires consent, relay the
   consent URL to the user verbatim.
+- ask_incident_agent (RTI): raw incident telemetry and alert evidence from Eventhouse --
+  exact alert timelines, per-sensor optical readings, suppressed alerts, and detection-vs-
+  acknowledgement latency. Use it for "what actually happened, when, and by how much"
+  questions. Prefer it over ask_knowledge_agent when you need machine-generated evidence
+  rather than written runbook / ticket narrative; use ask_knowledge_agent instead for
+  "how do we handle X", "what does the runbook say", or past-ticket narrative questions.
+  Do NOT reflexively call both -- only call both if you truly need both the raw evidence
+  and the written procedure/history.
 
 Always cite which specialist grounded each factual claim. When summarizing an incident,
-report: (1) blast radius (services + SLA exposure), (2) any shared-conduit or other
-non-obvious compounding risk, (3) the relevant runbook step, (4) any live vendor advisory,
-and (5) on-call / bridge context, in that order, clearly labeled. Say plainly when a specialist
-was unavailable or returned nothing rather than inventing an answer.
+report: (1) blast radius (services + SLA exposure), (2) the incident-telemetry evidence
+(timeline, exact readings, latency, suppression), (3) any shared-conduit or other non-obvious
+compounding risk, (4) the relevant runbook step, (5) any live vendor advisory, and (6)
+on-call / bridge context, in that order, clearly labeled. Say plainly when a specialist was
+unavailable or returned nothing rather than inventing an answer.
 """
 
 
@@ -733,6 +744,7 @@ class NocAgent(AgentInterface):
             ("fabric_iq", "ask_topology_agent", "Ask the Fabric IQ network-topology specialist (live topology graph, blast radius, shared-conduit risk) a question."),
             ("web_iq", "ask_threatintel_agent", "Ask the Web IQ specialist (public vendor advisories, carrier status, outage news) a question."),
             ("work_iq", "ask_comms_agent", "Ask the Work IQ specialist (Teams/Outlook: on-call roster, bridge chatter, change approvals) a question."),
+            ("rti_iq", "ask_incident_agent", "Ask the RTI incident-telemetry specialist (Fabric Eventhouse: alert timelines, optical readings, detection/ack latency) a question."),
         ]
         tools = []
         for key, tool_name, description in specs:
