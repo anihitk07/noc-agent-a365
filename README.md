@@ -34,6 +34,31 @@ steps, and [`docs/OUTBOUND_NOTIFICATIONS.md`](docs/OUTBOUND_NOTIFICATIONS.md)
 for the (optional, additive) agent-initiated multi-persona email broadcast
 capability — separate from the 4 read-only IQ tools above.
 
+## Architecture (deployed Azure estate — `feat/tokenops-gateway`)
+
+![Azure architecture — VNet-injected APIM gateway, Foundry Prompt Agents, run-ledger governance](docs/images/azure-architecture.svg)
+
+VNet-injected APIM sits in front of the AI Foundry project's 4 persisted Prompt
+Agents (each with its own single-connection Toolbox: `foundry-iq`, `fabric-iq`,
+`web-iq`, `work-iq`). A Container Apps environment hosts the `run-ledger`
+(backed by Azure Managed Redis), the `ca-adminui` governance UI, and the
+`config-sync-worker` job that reconciles Log Analytics spend + Cosmos pricing
+into APIM named values. Private endpoints isolate Foundry, Key Vault, Cosmos,
+and ACR inside `snet-private-endpoints`. Full component/edge legend is in the
+diagram itself; a PNG fallback is at
+[`docs/images/azure-architecture.png`](docs/images/azure-architecture.png).
+
+## TokenOps run-scoped governance — sequence diagram
+
+![TokenOps mixed-routing sequence diagram — run ledger precall/postcall governance](docs/images/tokenops-sequence.svg)
+
+Shows the mixed-routing path: direct `responses.create` calls from the
+orchestrator to each Prompt Agent, with token usage reported to the run ledger
+via `precall`/`postcall` regardless of credential kind (service credential vs.
+OBO/`UserEntraToken`). Full narrative and all steps are in
+[`docs/SEQUENCE.md`](docs/SEQUENCE.md) §3; PNG fallback at
+[`docs/images/tokenops-sequence.png`](docs/images/tokenops-sequence.png).
+
 ## IQ auth-type matrix (read this before wiring connections)
 
 | IQ surface | Auth type | Why |
