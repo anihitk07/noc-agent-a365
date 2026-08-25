@@ -571,6 +571,11 @@ _current_run_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
 _next_run_step: contextvars.ContextVar[Optional[Callable[[], str]]] = contextvars.ContextVar(
     "_next_run_step", default=None
 )
+# (user_id, display_name) for the turn -- read by _call_specialist to stamp the
+# per-request usage_event log line (see below) with who asked, not just the run id.
+_current_user_ctx: contextvars.ContextVar[Optional[tuple[str, str]]] = contextvars.ContextVar(
+    "_current_user_ctx", default=None
+)
 
 
 class _StaticTokenCredential(TokenCredential):
@@ -816,14 +821,43 @@ class NocAgent(AgentInterface):
         finally:
             project_client.close()
 
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "input_tokens", 0) or 0
+        output_tokens = getattr(usage, "output_tokens", 0) or 0
+        # ponytail: Responses API nests cached/reasoning under *_details; both are
+        # optional per model, default 0 rather than raising when a model omits them.
+        cached_tokens = getattr(getattr(usage, "input_tokens_details", None), "cached_tokens", 0) or 0
+        reasoning_tokens = getattr(getattr(usage, "output_tokens_details", None), "reasoning_tokens", 0) or 0
+        model_name = getattr(response, "model", agent_name) or agent_name
+        user_id_ctx, user_name_ctx = _current_user_ctx.get() or ("unknown", "unknown")
+        # Structured usage_event -> Application Insights customDimensions (via the
+        # configure_azure_monitor logging hook set up above), one row per specialist
+        # call. Query with a KQL join against the Cosmos `pricing` doc for $ cost;
+        # see gateway/app/config-sync-worker/check_usage_detail.py.
+        logger.info(
+            "usage_event",
+            extra={
+                "event": "specialist_usage",
+                "run_id": run_id or "",
+                "user_id": user_id_ctx,
+                "user_name": user_name_ctx,
+                "agent": agent_name,
+                "model": model_name,
+                "query": question[:500],
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cached_tokens": cached_tokens,
+                "reasoning_tokens": reasoning_tokens,
+            },
+        )
+
         if run_id:
-            usage = getattr(response, "usage", None)
             await _run_ledger_postcall(
                 run_id,
                 reservation_id,
-                model=getattr(response, "model", agent_name) or agent_name,
-                input_tokens=getattr(usage, "input_tokens", 0) or 0,
-                output_tokens=getattr(usage, "output_tokens", 0) or 0,
+                model=model_name,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             )
 
         consent_url = _extract_oauth_consent_url(response)
@@ -874,6 +908,7 @@ class NocAgent(AgentInterface):
             _current_run_token.set(run_token)
             _current_run_id.set(run_id if run_token else None)
             _next_run_step.set(_next_step if run_token else None)
+            _current_user_ctx.set((user_id, display_name))
 
             # Orchestrator's own model call: same direct-to-ledger governance as
             # each specialist (see _call_specialist docstring) -- not routed
