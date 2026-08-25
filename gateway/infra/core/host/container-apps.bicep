@@ -184,6 +184,14 @@ resource configSyncJob 'Microsoft.App/jobs@2024-10-02-preview' = if (workerJobEn
               value: apimName
             }
             {
+              name: 'APIM_RG'
+              value: resourceGroup().name
+            }
+            {
+              name: 'SUBSCRIPTION_ID'
+              value: subscription().subscriptionId
+            }
+            {
               name: 'WORKER_CLIENT_ID'
               value: workerClientId
             }
@@ -260,7 +268,10 @@ resource adminUiApp 'Microsoft.App/containerApps@2024-10-02-preview' = if (admin
       ]
       ingress: {
         external: adminUiPublic
-        targetPort: 8080
+        // ponytail: matches the Dockerfile's `EXPOSE 8000` / `uvicorn --port 8000` -- the
+        // previous 8080 never matched anything the container listens on, so the readiness
+        // probe never succeeded and the revision stayed stuck Activating/restarting forever.
+        targetPort: 8000
         transport: 'auto'
       }
     }
@@ -321,6 +332,17 @@ resource adminUiApp 'Microsoft.App/containerApps@2024-10-02-preview' = if (admin
             {
               name: 'CONFIG_SYNC_JOB_NAME'
               value: jobName
+            }
+            {
+              // ponytail: same gap fixed in the config-sync-worker job (sync.py /
+              // container-apps.bicep) -- bff/config.py reads os.environ["SUBSCRIPTION_ID"]
+              // and ["APIM_RG"] directly and crash-loops with KeyError without them.
+              name: 'SUBSCRIPTION_ID'
+              value: subscription().subscriptionId
+            }
+            {
+              name: 'APIM_RG'
+              value: resourceGroup().name
             }
           ]
         }

@@ -439,6 +439,7 @@ module apim 'core/apim/apim.bicep' = {
     tokenQuota: tokenQuota
     tokenQuotaPeriod: tokenQuotaPeriod
     runLedgerBaseUrl: runLedger.outputs.appFqdn
+    adminUiBaseUrl: containerApps.outputs.adminUiFqdn
     runTokensPerMinute: runTokensPerMinute
     runTokenQuota: runTokenQuota
     runTokenQuotaPeriod: runTokenQuotaPeriod
@@ -521,4 +522,5 @@ output keyVaultUri string = keyVault.outputs.vaultUri
 output containerAppsEnvironmentId string = containerApps.outputs.environmentId
 output configSyncJobName string = containerApps.outputs.jobName
 output adminUiFqdn string = containerApps.outputs.adminUiFqdn
+output adminUiGatewayUrl string = apim.outputs.adminUiGatewayUrl
 output runLedgerFqdn string = runLedger.outputs.appFqdn

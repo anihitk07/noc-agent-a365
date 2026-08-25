@@ -2,5 +2,5 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY sync.py budget.py ./
+COPY sync.py budget.py pricing.py ./
 ENTRYPOINT ["python", "sync.py"]

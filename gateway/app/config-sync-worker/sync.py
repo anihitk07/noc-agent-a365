@@ -25,6 +25,7 @@ from azure.mgmt.apimanagement import ApiManagementClient
 from azure.monitor.query import LogsQueryClient, LogsQueryStatus
 
 import budget
+import pricing
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("config-sync")
@@ -37,11 +38,23 @@ FIELD_TO_NAMED_VALUE = {
     "token_quota_period": "token-quota-period",
 }
 
+# ponytail: first-run bootstrap only -- nothing ever seeded the "global" doc (no Terraform/Bicep
+# seed step, and Cosmos is private-endpoint-only so it can't be seeded from a laptop). Mirrors
+# the defaults already live in APIM's token-quota-default/token-quota-period-default named
+# values. Admin UI overwrites this the moment an operator edits config there.
+DEFAULT_GLOBAL_CONFIG = {
+    "id": "global",
+    "allowed_models": ["gpt-5.4", "gpt-5.4-mini", "grok-4.3", "DeepSeek-V4-Pro"],
+    "tokens_per_minute": 10000,
+    "token_quota": 50000,
+    "token_quota_period": "Daily",
+}
+
 
 def read_config(cred) -> dict:
     client = CosmosClient(os.environ["COSMOS_ENDPOINT"], credential=cred)
     container = client.get_database_client(os.environ["COSMOS_DATABASE"]).get_container_client(
-        os.environ["COSMOS_CONTAINER"]
+        os.environ["COSMOS_CONFIG_CONTAINER"]
     )
     doc = container.read_item(item="global", partition_key="global")
     log.info("read config doc: %s", {k: doc.get(k) for k in FIELD_TO_NAMED_VALUE})
@@ -168,6 +181,23 @@ def read_pricing(container) -> dict:
     return doc.get("models", {})
 
 
+def sync_pricing(container) -> None:
+    """Refresh the `pricing` doc from the Azure Retail Prices API (pricing.py -- already handles
+    unit-of-measure normalization and per-model meter matching for the 4 shipped models).
+    Fail-safe: the Retail Prices API has no entries for these demo/future model names today, so a
+    failed refresh must never block the rest of config sync -- leave the existing doc untouched
+    and let cost stay $0/manual-override rather than crash the job."""
+    region = os.environ.get("PRICING_REGION", "eastus2")
+    try:
+        models = pricing.fetch_model_pricing(region)
+    except Exception:  # noqa: BLE001 -- pricing refresh is best-effort, not a job-failure condition
+        log.exception("pricing refresh failed (region=%s); leaving existing pricing doc untouched", region)
+        return
+    container.upsert_item({"id": PRICING_DOC_ID, "models": models})
+    log.info("synced pricing for %d model(s) from Retail Prices API (region=%s)", len(models), region)
+
+
+
 def sync_budget_downgrades(cred, config_container) -> None:
     """Evaluate daily USD budgets and persist active_downgrade changes to consumer_config docs.
     Fail-safe: if the usage query raises, log and return WITHOUT touching existing state."""
@@ -188,6 +218,15 @@ def sync_budget_downgrades(cred, config_container) -> None:
         lvl = (updated.get("active_downgrade") or {}).get("level", 0)
         log.info("consumer %s downgrade level -> %d (cost eval)", consumer, lvl)
     log.info("budget eval: %d consumer(s) changed", len(changed))
+    # ponytail: log every consumer's computed spend unconditionally (not just those that crossed a
+    # downgrade threshold) so today's $ cost is visible in this job's own logs (Log Analytics is
+    # publicly queryable; Cosmos data-plane is private-endpoint-only and isn't reachable off-VNet).
+    for doc in docs:
+        consumer = doc.get("consumer")
+        if not consumer:
+            continue
+        cost = budget.cost_for(usage.get(consumer, {}), pricing)
+        log.info("consumer %s spend $%.4f today (usage_usd)", consumer, cost)
 
 
 def sync_named_values(cred, config: dict) -> None:
@@ -214,15 +253,25 @@ def sync_named_values(cred, config: dict) -> None:
 
 
 def main() -> int:
-    cred = DefaultAzureCredential()
+    # ponytail: Container Apps Jobs (unlike long-running Container Apps) need the user-assigned
+    # identity's client_id passed explicitly -- bare DefaultAzureCredential() fails with
+    # "invalid_scope" here even with exactly one identity attached. WORKER_CLIENT_ID was already
+    # provisioned in Bicep for this but never wired into the credential until now.
+    cred = DefaultAzureCredential(managed_identity_client_id=os.environ.get("WORKER_CLIENT_ID"))
     try:
         client = CosmosClient(os.environ["COSMOS_ENDPOINT"], credential=cred)
         container = client.get_database_client(
             os.environ["COSMOS_DATABASE"]
-        ).get_container_client(os.environ["COSMOS_CONTAINER"])
-        config = container.read_item(item="global", partition_key="global")
+        ).get_container_client(os.environ["COSMOS_CONFIG_CONTAINER"])
+        try:
+            config = container.read_item(item="global", partition_key="global")
+        except CosmosResourceNotFoundError:
+            log.warning("no 'global' config doc found; seeding defaults (first run)")
+            container.upsert_item(DEFAULT_GLOBAL_CONFIG)
+            config = DEFAULT_GLOBAL_CONFIG
         log.info("read config doc: %s", {k: config.get(k) for k in FIELD_TO_NAMED_VALUE})
         sync_named_values(cred, config)
+        sync_pricing(container)
         sync_budget_downgrades(cred, container)
         sync_consumer_config(cred, container)
     except Exception:  # noqa: BLE001 - top-level job boundary; log and fail the execution

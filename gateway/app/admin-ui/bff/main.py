@@ -1,6 +1,7 @@
 """Production entrypoint: build real dependencies (DefaultAzureCredential + Azure SDK clients),
 wire the JWKS verifier, and expose `app` for uvicorn (uvicorn bff.main:app)."""
 import logging
+import os
 from pathlib import Path
 
 import httpx
@@ -32,7 +33,11 @@ def _read_model_prices(pricing_store: PricingStore) -> dict:
 
 def build_app():
     settings = Settings.from_env()
-    cred = DefaultAzureCredential()
+    # ponytail: bare DefaultAzureCredential() fails to resolve the attached user-assigned
+    # identity on this Container App (ManagedIdentityCredential request 400) even though
+    # exactly one identity is attached -- same gap fixed in config-sync-worker/sync.py.
+    # Pass the client id explicitly via the ADMIN_UI_CLIENT_ID env var wired in Bicep.
+    cred = DefaultAzureCredential(managed_identity_client_id=os.environ.get("ADMIN_UI_CLIENT_ID"))
 
     apim_client = ApiManagementClient(cred, settings.subscription_id)
     apim = ApimKeys(client=apim_client, subscription_id=settings.subscription_id, resource_group=settings.apim_rg, service_name=settings.apim_name)

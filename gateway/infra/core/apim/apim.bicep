@@ -82,6 +82,9 @@ param entraTeamClaim string
 @description('Base URL of the internal run-ledger service.')
 param runLedgerBaseUrl string
 
+@description('Internal-ingress base URL (including https://) of the Admin UI Container App. Empty skips the proxy API.')
+param adminUiBaseUrl string = ''
+
 @description('Run-scoped token-per-minute limit enforced before the ledger hop.')
 param runTokensPerMinute int
 
@@ -115,6 +118,10 @@ var runLedgerBaseUrlNamedValueName = 'run-ledger-base-url'
 var runTokenSigningKeyNamedValueName = 'run-token-signing-key'
 var runLedgerBaseUrlNamedValueReference = '{{${runLedgerBaseUrlNamedValueName}}}'
 var runTokenSigningKeyNamedValueReference = '{{${runTokenSigningKeyNamedValueName}}}'
+var adminUiEnabled = !empty(adminUiBaseUrl)
+// ponytail: container-apps.bicep's adminUiFqdn output already includes the https:// scheme
+// (unlike runLedger's bare-FQDN appFqdn output) -- use it as-is, don't double-prefix it.
+var adminUiBackendUrl = adminUiBaseUrl
 var openaiPolicy = replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(openaiPolicyTemplate, '{{JWT_BLOCK}}', jwtBlock), '{{CLIENT_AUTH_MODE}}', clientAuthMode), '{{ENTRA_TEAM_CLAIM}}', entraTeamClaim), '{{ALLOWED_MODELS_JSON}}', allowedModelsJsonXmlSafe), '{{DEFAULT_TPM}}', string(tokensPerMinute)), '{{DEFAULT_QUOTA}}', string(tokenQuota)), '{{DEFAULT_QUOTA_PERIOD}}', tokenQuotaPeriod), '{{OPENAI_BASE_URL}}', openaiPathBase), '{{RUN_LEDGER_BASE_URL}}', runLedgerBaseUrlNamedValueReference), '{{RUN_TOKEN_SIGNING_KEY_NAMED_VALUE}}', runTokenSigningKeyNamedValueReference), '{{RUN_TOKEN_QUOTA}}', string(runTokenQuota)), '{{RUN_TOKEN_QUOTA_PERIOD}}', runTokenQuotaPeriod), '{{RUN_TOKENS_PER_MINUTE}}', string(runTokensPerMinute))
 var openaiPolicyRendered = replace(replace(openaiPolicy, '{{FOUNDRY_BASE_URL}}', foundryV1Base), '{{OPENAI_API_VERSION}}', openaiApiVersion)
 var foundryPolicy = replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(foundryPolicyTemplate, '{{JWT_BLOCK}}', jwtBlock), '{{CLIENT_AUTH_MODE}}', clientAuthMode), '{{ENTRA_TEAM_CLAIM}}', entraTeamClaim), '{{ALLOWED_MODELS_JSON}}', allowedModelsJsonXmlSafe), '{{FOUNDRY_BASE_URL}}', foundryV1Base), '{{OPENAI_BASE_URL}}', openaiPathBase), '{{RUN_LEDGER_BASE_URL}}', runLedgerBaseUrlNamedValueReference), '{{RUN_TOKEN_SIGNING_KEY_NAMED_VALUE}}', runTokenSigningKeyNamedValueReference), '{{RUN_TOKEN_QUOTA}}', string(runTokenQuota)), '{{RUN_TOKEN_QUOTA_PERIOD}}', runTokenQuotaPeriod), '{{RUN_TOKENS_PER_MINUTE}}', string(runTokensPerMinute))
@@ -292,6 +299,63 @@ resource runLedgerApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-
 
 resource runLedgerDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2024-05-01' = {
   parent: runLedgerApi
+  name: 'applicationinsights'
+  properties: {
+    loggerId: appInsightsLogger.id
+    sampling: {
+      samplingType: 'fixed'
+      percentage: 100
+    }
+    metrics: true
+    verbosity: 'information'
+    httpCorrelationProtocol: 'W3C'
+  }
+}
+
+resource adminUiApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = if (adminUiEnabled) {
+  parent: apim
+  name: 'admin-ui-gateway'
+  properties: {
+    // ponytail: same internal-ingress-only situation as run-ledger above -- the Admin UI
+    // Container App stays VNet-private (governance requirement), and APIM (already in the
+    // VNet, already externally reachable) is the one public door onto it. This is a
+    // wildcard reverse-proxy rather than a small fixed operation set (run-ledger's 3 POST
+    // routes) because the Admin UI serves a SPA plus a multi-route FastAPI BFF (auth
+    // callback, static assets, /api/* data routes) that we do not want to keep enumerating
+    // here every time a route is added.
+    path: 'admin'
+    displayName: 'Admin UI gateway'
+    subscriptionRequired: false
+    protocols: [
+      'https'
+    ]
+  }
+}
+
+resource adminUiApiWildcardOperation 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = if (adminUiEnabled) {
+  parent: adminUiApi
+  name: 'passthrough-any'
+  properties: {
+    displayName: 'Passthrough any route/method'
+    method: '*'
+    urlTemplate: '/*'
+  }
+}
+
+resource adminUiApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' = if (adminUiEnabled) {
+  parent: adminUiApi
+  name: 'policy'
+  properties: {
+    format: 'xml'
+    // No validate-jwt here: the Admin UI BFF already performs its own Entra auth-code
+    // flow with session cookies (Entra-gated, admin-group scoped) -- an APIM-level bearer
+    // check would conflict with that browser/cookie based flow.
+    value: '<policies><inbound><base /><set-backend-service base-url="${adminUiBackendUrl}" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+  }
+}
+
+resource adminUiDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2024-05-01' = if (adminUiEnabled) {
+  parent: adminUiApi
   name: 'applicationinsights'
   properties: {
     loggerId: appInsightsLogger.id
@@ -486,6 +550,7 @@ output apimId string = apim.id
 output apimName string = apim.name
 output gatewayUrl string = 'https://${apim.name}.azure-api.net'
 output ledgerGatewayUrl string = 'https://${apim.name}.azure-api.net/ledger'
+output adminUiGatewayUrl string = adminUiEnabled ? 'https://${apim.name}.azure-api.net/admin' : ''
 output appServiceSubscriptionKeySecretUri string = appServiceSubscriptionKeySecret.properties.secretUri
 output privateIpAddress string = !empty(apim.properties.privateIPAddresses) ? apim.properties.privateIPAddresses[0] : ''
 output identityPrincipalId string = apim.identity.principalId

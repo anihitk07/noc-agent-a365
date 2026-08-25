@@ -41,13 +41,18 @@ def query_usage(cred, workspace_id: str, days: int) -> dict:
 
 
 def read_pricing(cred, cosmos_endpoint: str) -> dict:
-    client = CosmosClient(cosmos_endpoint, credential=cred)
-    container = client.get_database_client("gateway").get_container_client(
-        os.environ.get("COSMOS_CONFIG_CONTAINER", "config")
-    )
+    # ponytail: Cosmos is private-endpoint-only, so this raises when run off-VNet (e.g. a
+    # laptop). Cost is a nice-to-have; degrade to $0 cost rather than crashing the whole report.
     try:
+        client = CosmosClient(cosmos_endpoint, credential=cred)
+        container = client.get_database_client("gateway").get_container_client(
+            os.environ.get("COSMOS_CONFIG_CONTAINER", "config")
+        )
         return container.read_item(item=PRICING_DOC_ID, partition_key=PRICING_DOC_ID).get("models", {})
     except CosmosResourceNotFoundError:
+        return {}
+    except Exception as exc:  # noqa: BLE001
+        print(f"(pricing lookup failed, showing $0 cost: {exc})\n")
         return {}
 
 
