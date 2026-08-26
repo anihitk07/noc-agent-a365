@@ -269,7 +269,19 @@ here since they were silent (no error at request time):
 |---|---|---|
 | `gh repo clone microsoft/...` or GitHub MCP tools fail with `GraphQL: Resource protected by organization SAML enforcement` | The `microsoft` org enforces SAML SSO on the GitHub App token used by `gh`/MCP | Use a plain `git clone https://github.com/microsoft/<repo>.git` instead — works for public repos without hitting the SAML gate. |
 
-## Outbound email-trigger notification bugs (found during live e2e testing, all fixed)
+## Fabric RTI incident-agent: Foundry Toolbox spike result (B2-c)
+
+Spiked whether a persisted Foundry **Prompt Agent** can point its `MCPTool` at
+a **Toolbox's** combined MCP endpoint (`{PROJECT_ENDPOINT}/toolboxes/{name}/versions/{v}/mcp`)
+instead of a raw MCP server, ahead of adding `noc-incident-agent` over the new
+Fabric Eventhouse. Outcome: **B2-c — not attachable.**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Throwaway toolbox wrapping `fabric-iq-connection` answered `tools/list` directly (200, with an `ai.azure.com` bearer token) | The toolbox's own MCP endpoint is fine in isolation | n/a — confirms the toolbox itself isn't broken |
+| A throwaway Prompt Agent whose `MCPTool.server_url` pointed at that toolbox endpoint failed every call with `tool_user_error` → inner `401 PermissionDenied` (both under the app's default credential and under `_StaticTokenCredential` OBO injection) | `PromptAgentDefinition` only supports `tools: list[Tool]` — a Prompt Agent's own `MCPTool` cannot authenticate to a Toolbox's MCP endpoint at all, so OBO passthrough through that hop was never reachable to test | **Decision: skip the toolbox layer for `noc-incident-agent`.** It gets a direct `MCPTool(server_url=FABRIC_RTI_MCP_URL, project_connection_id=<fabric-rti-connection>)`, identical in shape to the existing `fabric_iq`/`work_iq` specialists. `scripts/create_rti_toolbox.py` (if written) stays in the repo unused/unwired, in case a future SDK version adds toolbox support to `PromptAgentDefinition`. |
+
+
 
 See `docs/OUTBOUND_NOTIFICATIONS.md`'s "Live E2E test results" section for
 full detail and the Accenture-facing writeup. Summary table:
@@ -281,3 +293,177 @@ full detail and the Accenture-facing writeup. Summary table:
 | The `partners` persona email is never sent (`broadcast()` returns `{"partners": false}` or it's silently absent), while the other 3 personas work | A live App Service app setting was named `NOTIFY_PARTNERS_EMAILS` (plural) but the code/`.env.template` read `NOTIFY_PARTNER_EMAILS` (singular) — missing recipients is a silent, by-design skip (`logger.info`, not an error), so this looked like "nothing happened" rather than a clear failure | Set the app setting with the exact singular name; `az webapp config appsettings list` + `grep -i notify` is the fastest way to catch a typo like this. |
 | Delivered persona emails show literal, unsubstituted text like `{ServiceName}`/`{IncidentId}` instead of real values | The test/example email body used field names (`Site`/`Severity`/`ETA`) that don't match ANY persona's actual `{Placeholder}` names in `data/runbooks/customer_communication_template.md` — `notifications.py`'s `_SafeDict.__missing__` deliberately leaves unknown tokens untouched rather than raising, so a field-name mismatch fails silently in the delivered email rather than with an exception | Use the exact field names from the template's "Variable Reference" table (case-sensitive) — see the corrected example body in `docs/OUTBOUND_NOTIFICATIONS.md` §5/Path B. |
 | The `partners` persona email contains its normal body PLUS the entire trailing "## Variable Reference" markdown table (and a stray `---`) appended after it | `notifications.py`'s `_extract_persona_section()` bounded each `### Persona: X` section by searching only for the next `### ` heading; `partners` is the LAST persona in the template file, followed by a `## Variable Reference` (level-2, not level-3) heading, which `\n### ` never matched, so the slice ran to end-of-file | Changed the boundary search to stop at ANY next markdown heading level (`\n#{1,3} `) and strip a trailing `---` rule. Strengthened `notifications.py`'s `_demo()` self-check to assert no `{` remains in the rendered body (previously only checked the subject) and to specifically guard against a "Variable Reference" leak regressing. |
+
+## Per-request token usage logging (added on `feat/tokenops-gateway`, found during live e2e testing)
+
+Built to answer "what did this Teams turn actually cost, per user/agent/model,
+with token + cost breakdown" — see `agent/agent.py`'s `usage_event` log line and
+`gateway/app/config-sync-worker/check_usage_detail.py`. Three real bugs surfaced
+along the way, in the order they were found:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `check_usage_detail.py` KQL fails with `SEM0100: 'extend' operator: Failed to resolve scalar expression named 'customDimensions'` | Workspace-based App Insights `AppTraces` names the custom-dimensions column `Properties` (a raw JSON string), not `customDimensions` as most classic App Insights docs/examples assume | Use `extend p = parse_json(Properties)` instead. Verify any new KQL against this workspace with `az monitor log-analytics query -w <workspace> --analytics-query "AppTraces \| take 1"` before trusting column names. |
+| Zero `usage_event` rows for several Teams test turns in a row, even though other App Insights tables (`AppRequests`/`AppDependencies`/`AppExceptions`) showed real, fresh telemetry for the same window | **Not** ingestion lag (the first suspicion) — cross-referencing `AppDependencies` (showed a specialist call that had actually *succeeded*, ~83.7s) against `AppTraces` (no corresponding custom log line at all) revealed that **no `logger.info()` call in the entire app had ever reached App Insights, all session**, including a pre-existing "📨 Message from" line that predates this feature | Root cause below. Diagnostic pattern worth repeating: when a filtered custom-log query returns nothing, always cross-check raw `AppTraces`/`AppRequests`/`AppDependencies` for the same window before concluding "no data yet" — lag is a real thing but was a red herring here. |
+| (root cause of the row above) All `logger.info()` calls app-wide were silently dropped, no error anywhere | `agent/agent.py` called `configure_azure_monitor()` (which attaches its own handler to Python's root logger as a side effect) and then called `logging.basicConfig(level=logging.INFO)` — `basicConfig()` is a documented no-op once the root logger already has ≥1 handler, so the root logger silently stayed at Python's default `WARNING` and every INFO line in the whole app (not just the new usage_event line) was swallowed before ever reaching the exporter | Added `logging.getLogger().setLevel(logging.INFO)` immediately after `configure_azure_monitor()` — unconditional, doesn't depend on handler state. Generalise this fix to any Python app combining `azure.monitor.opentelemetry` with `logging.basicConfig()`. |
+| `check_usage_detail.py`'s Cosmos pricing lookup fails with `(Forbidden) Request originated from IP <x> through public internet. This is blocked by your Cosmos DB account firewall settings` | `cosaigwdeveus2n2tjinbhnbln6` has `publicNetworkAccess=Disabled` + VNet filter enabled — private-endpoint-only by design. Cosmos DB data-plane **RBAC** (`Cosmos DB Built-in Data Reader`, assigned via `az cosmosdb sql role assignment create`) is necessary but **not sufficient**; when `publicNetworkAccess` is `Disabled`, no public IP gets through regardless of RBAC or IP allow-lists | Attempting `az cosmosdb update --public-network-access Enabled` (even scoped to a single IP via `--ip-range-filter`) is **silently reverted** by an Azure Policy with a **Modify** effect on the resource group (confirmed via `az monitor activity-log list` showing `Microsoft.Authorization/policies/modify/action Succeeded` right after the write) — this is a governance guardrail, don't keep retrying it. Made the script's cost lookup non-fatal (`read_pricing_safe()` catches and shows `$0.00`/a warning instead of crashing) so usage rows still print. To get real `cost_usd` locally, run the lookup from **inside the VNet** (e.g. exec into `ca-adminui-aigw-dev-eus2`, which already computes cost correctly for its own dashboard) rather than from a laptop. |
+
+Separately (not fixed, just documented — real upstream/design issues, not bugs in this feature):
+
+- Foundry IQ's `knowledge_base_retrieve` tool intermittently takes 90–172s+ before succeeding/timing out server-side (`InternalServerError: Operation exceeded the maximum runtime of 90 seconds` seen once, a 172.7s successful-but-slow call seen once).
+- The orchestrator's hard-coded `AGENT_RUN_TIMEOUT_SECONDS` (180s) watchdog can trip on a single Teams turn that asks two questions at once, since sequential/overlapping specialist calls can each legitimately take 80–170s+. Workaround for now: ask one thing per Teams message.
+- `POST /ledger/v1/runs` still 404s (APIM route mismatch) — fails safe, run-scoped governance headers are simply not attached; unrelated to usage logging.
+
+## Config-sync-worker + Admin UI: full bug chain from "worker job never completes" to "cost shows $0"
+
+Found and fixed in order while chasing "how do I track token cost" end-to-end:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `sync.py` `KeyError`/silently reads nothing | Job's Bicep set env var `COSMOS_CONTAINER`; `sync.py` reads `COSMOS_CONFIG_CONTAINER` | Renamed the read in `sync.py` to match the Bicep-provisioned name. |
+| `sync_named_values()` throws `KeyError: 'SUBSCRIPTION_ID'` (later also seen in Admin UI, same code path) | Job's/Admin UI's Bicep container template never had `SUBSCRIPTION_ID`/`APIM_RG` env vars, only `APIM_NAME` | Added both to `container-apps.bicep` for **both** `configSyncJob` and `adminUiApp` (`subscription().subscriptionId`, `resourceGroup().name`). |
+| `ManagedIdentityCredential` 400 `invalid_scope`/`ClientAuthenticationError` from a bare `DefaultAzureCredential()` | **Not** Jobs-specific as first suspected — the exact same failure hit the long-running `ca-adminui-aigw-dev-eus2` Container App too. Bare `DefaultAzureCredential()` can't disambiguate the identity in this environment even with only one user-assigned identity attached | Pass `managed_identity_client_id=os.environ.get("WORKER_CLIENT_ID"/"ADMIN_UI_CLIENT_ID")` explicitly. **Treat this as a systemic pattern**: any Container App or Job in this stack using a bare `DefaultAzureCredential()` needs the same fix. |
+| Cosmos `403` after the identity fixed itself | Cosmos DB **data-plane RBAC** (`Cosmos DB Built-in Data Contributor`) is separate from control-plane/ARM RBAC, and had only ever been assigned to the human user, never to the worker's or Admin UI's managed identity | `az cosmosdb sql role assignment create` for both `fbac1743-...` (worker) and `eddeeb1b-4614-4d18-becc-86c26976b04b` (admin-ui) principals. Use **Contributor**, not Reader — the worker calls `upsert_item`. |
+| Admin UI container never becomes ready (replica stuck `started:false` forever) | `admin-ui/Dockerfile` hardcodes `EXPOSE 8000`/`uvicorn --port 8000`; `container-apps.bicep`'s ingress `targetPort` was `8080` — pre-existing, since initial deploy | Changed ingress `targetPort` to `8000` to match the app, not the other way round. |
+| `az containerapp update --image foo:latest` deploys, but the old code keeps running | Revision creation is deduped on the **literal tag string**, not the resolved image digest — a mutable `:latest` tag looks "unchanged" to Container Apps even after a new push | Always pass `--revision-suffix <name>` when redeploying under a mutable tag. |
+| APIM operation with `method: "*"` + `urlTemplate: "/*"` never matches at the gateway, even though the management API accepts it | Wildcard-method operations are accepted by ARM validation but are not matched by the runtime gateway | Create one operation per real verb (GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS), each `urlTemplate: "/{*path}"` with a declared `templateParameters` entry (`name=path`). |
+| APIM → internal-ingress Container App: gateway-runtime requests to **both** `run-ledger-gateway` and the new `admin-ui-gateway` return Azure Container Apps' own "This Container App is stopped or does not exist" 404, even once the backend app is confirmed healthy | **Unresolved, systemic** — ruled out DNS (private zone `*.internal...` → correct static IP, VNet-linked), NSGs (default allow, no blocking custom rules), subscription-key auth, propagation delay, `rewrite-uri`, and backend health. Not an Admin-UI-specific bug: the pre-existing `run-ledger-gateway` API has apparently never been proven reachable through APIM either. | Not fixed. Needs a VNet-internal test client (or Azure support) to isolate further. Until resolved, use `check_usage.py`/`check_usage_detail.py` (run locally, or from inside the VNet) instead of the public Admin UI URL. |
+| `sync.py` `main()` crashes with `CosmosResourceNotFoundError` reading `item="global"` | No seed step (Terraform/Bicep/manual) had ever created the Cosmos `global` config doc — first real run of the worker in this environment | `main()` now catches the not-found case and `upsert_item`s a `DEFAULT_GLOBAL_CONFIG` (mirrors the existing `token-quota-default`/`token-quota-period-default` APIM named values) on first run only; Admin UI edits overwrite it thereafter. |
+| `check_usage.py` (unlike `check_usage_detail.py`) crashes outright when Cosmos is unreachable (e.g. from a laptop, private-endpoint-only) | `read_pricing()` had no try/except around the Cosmos call, inconsistent with the sibling script | Wrapped it the same way — degrades to `$0` cost with a printed reason instead of crashing. |
+| Cost stayed `$0` even after the worker ran cleanly | `pricing.py` (Retail Prices API fetcher + per-model meter-matching + unit-of-measure normalization) already existed fully built and tested, but was never called from `sync.py`, and the `Dockerfile` never `COPY`'d it into the image (`ModuleNotFoundError: No module named 'pricing'` the first time it was wired in) | Added `sync_pricing()` to `sync.py` (fail-safe: logs and leaves the existing doc untouched if the Retail Prices API has no match, never fails the job) and added `pricing.py` to the Dockerfile's `COPY` line. Confirmed live: `synced pricing for 4 model(s) from Retail Prices API`. |
+
+Net result: config-sync-worker now completes end-to-end every run (config → named values → pricing → budget downgrades → consumer config), and real Retail Prices-sourced cost now flows into `check_usage.py`/`check_usage_detail.py`. The only open item is the APIM→internal-ACA reachability gap above, which blocks the public Admin UI portal (not cost tracking itself).
+
+## Live end-to-end verification: real Teams turn → usage report (this session)
+
+Sent real Teams messages to the deployed agent and confirmed the whole
+usage-reporting chain with live data, closing the "not yet done" item from
+the prior session's primer.
+
+| Finding | Detail |
+|---|---|
+| A plain greeting ("status check") produces **no** `usage_event` row | `usage_event` is only logged inside `agent.py`'s `_call_specialist()` — i.e. only when the orchestrator actually routes to one of the 4 specialist agents. A message the orchestrator can answer directly with no tool call legitimately logs nothing. Not a bug; ask something that needs a specialist (runbook/topology/advisory/comms lookup) to generate a row. |
+| `check_usage.py` shows `No usage rows found` even after a real specialist-routed turn | **By design, not a bug.** `check_usage.py`'s `_USAGE_KQL` reads `AppMetrics` rows named `"Prompt Tokens"/"Completion Tokens"`, which APIM's `azure-openai-token-limit` policy only emits for traffic that actually flows through the `openai-gateway`/`foundry-gateway` APIs. Per `gateway/PORTING_NOTES.md`'s "final mixed-routing decision", this app's own agent/model traffic **always bypasses APIM** and calls Foundry directly — those two APIs exist for *other* direct AOAI/Foundry callers, not this app's hot path. `check_usage.py` will correctly show `$0`/nothing for this app forever; that's expected. |
+| `check_usage_detail.py` is the correct tool for this app | It reads the `usage_event` AppTraces rows agent.py emits per specialist call — confirmed live with 4 real requests across all 4 specialists (`noc-knowledge-agent`, `noc-comms-agent`, `noc-threatintel-agent`), real token counts (e.g. 17307 in / 3769 out on one `gpt-5.4` call). |
+| `cost_usd` still shows `0.00000` for these live rows | Same pre-existing, already-documented Cosmos private-endpoint restriction above — pricing lookup 403s from a laptop's public IP. Usage/token data itself is fully verified end-to-end; only the local `$` rendering needs a VNet-internal caller (e.g. exec into `ca-adminui-aigw-dev-eus2`). |
+
+## noc-incident-agent (RTI) live verification — partial, pending a real Teams turn
+
+Everything server-side is deployed and provisioned this session: Fabric
+Eventhouse + KQL database seeded (413,658 `OpticalTelemetry` rows, 8,747
+`NetworkAlerts` rows, 69 `IncidentEvents` rows), `fabric-rti-connection`
+project connection, `noc-incident-agent` Prompt Agent (single direct
+`MCPTool`, no toolbox per the B2-c spike above), `agent.py` wired with the
+5th `SPECIALIST_AGENTS` entry, `ORCHESTRATOR_INSTRUCTIONS` updated, and the
+app redeployed to App Service (`azd deploy web`, health check `200`).
+
+| Attempted | Result |
+|---|---|
+| Direct `Foundry-MCP-agent_invoke` of `noc-incident-agent` from this session's own identity, bypassing Teams entirely, to sanity-check the Eventhouse chain works | `403 Forbidden` — `does not have permissions for .../agents/read actions`. This identity isn't the Teams-user OBO principal nor the App Service's own managed identity, so this failure is expected and unrelated to the new wiring; it isn't a substitute for a real Teams-routed turn anyway (it would exercise the agent identity, not the OBO/run-ledger/`usage_event` path). |
+| Real Teams turn routed to `ask_incident_agent`, followed by `check_usage_detail.py` to confirm a `usage_event` row for `noc-incident-agent` and a real Eventhouse-grounded answer | **Not yet done.** Needs a human to send a Teams message (e.g. "what was the alert timeline and detection-to-ack latency for the MEL-BNE fibre link?") to the deployed bot. This is the same pattern used to verify the other 4 specialists earlier this session — requires an actual Teams client, which wasn't available at this point in the session. |
+
+**Next step, unchanged from the plan:** send a real Teams turn, then run
+`check_usage_detail.py --hours 1` and confirm a `noc-incident-agent` row with
+non-zero tokens, and confirm the reply cites real alert/telemetry rows rather
+than declining or hallucinating.
+
+## noc-incident-agent (RTI): real Teams-triggered error, root-caused and fixed live
+
+A real Teams turn routed to `ask_incident_agent` and hit a genuine tool error:
+
+```
+Semantic error: union: column named 'TableName' already exists
+```
+
+This closes the "pending a real Teams turn" gap above — but the first real
+usage surfaced two more bugs behind it, all root-caused and fixed live against
+the actual Eventhouse and Foundry project (no guessing, no symptom patches):
+
+### Bug 1 — nested/piped `union withsource=TableName` fails
+
+Reproduced directly against the live KQL database with a throwaway script
+(`azure-kusto-data` + `AzureDeveloperCliCredential`, deleted after use):
+
+- `union withsource=TableName A, B, C` (flat, one stage) — **works**.
+- `(union withsource=TableName A, B) | union withsource=TableName C` (nested,
+  two stages) — **fails** with exactly the reported error, because the first
+  union stage already materializes a `TableName` column and the second stage
+  tries to add another one with the same name.
+
+This is a query-generation limitation in the Fabric RTI MCP server's own
+NL2KQL layer (Microsoft-hosted, Public Preview) when a question spans all 3
+Eventhouse tables — not our schema, not our ingestion, not fixable upstream
+from this repo. **Fix:** added an explicit "query ONE table at a time,
+correlate in your own reasoning, never ask for a query that unions/joins all
+three tables" constraint to `noc-incident-agent`'s instructions in
+`scripts/create_foundry_agents.py`, with the exact failure mode explained
+inline so future maintainers don't reintroduce it. Redeployed as v2.
+
+### Bug 2 — model hallucinated column names once the union bug was gone
+
+Direct-SDK re-test (`azure-ai-projects` `AIProjectClient` + `AzureCliCredential`,
+same call shape as `agent.py`'s `_call_specialist`, via a throwaway
+`scripts/_diag_invoke.py`, deleted after use) got past the union error but
+then failed with:
+
+```
+KQL query validation failed: 'TimeGenerated', 'LinkId' [on NetworkAlerts],
+'AlertName', 'AlertState', 'IsSuppressed', 'SuppressionReason',
+'AcknowledgedBy', 'AcknowledgedTime', 'Description' do not refer to any
+known column...
+```
+
+The model guessed a generic "typical alerts table" schema instead of the
+actual one. **Fix:** embedded the exact 3 table schemas (column names + types,
+copied verbatim from `scripts/create_eventhouse.py`'s `TABLE_SPECS`) directly
+into the agent's instructions, plus an explicit note that `NetworkAlerts` has
+no `LinkId` column — the affected link/sensor is `EntityId` instead (confirmed
+against `scripts/generate_incident_telemetry.py`, which populates `EntityId`
+from each sensor's `MonitoredEntityId`). Redeployed as v3.
+
+### Bug 3 — Fabric capacity was paused, producing a misleading 404
+
+After fixing the schema, the same direct-SDK re-test failed again, this time:
+
+```
+The remote MCP server ... returned HTTP 404 (Not Found) while fetching tool
+executeQuery.
+```
+
+Probing the Fabric MCP endpoint directly with `curl` + a raw bearer token
+(bypassing Foundry/MCP entirely) surfaced the real error underneath the
+generic 404: `"Internal error CapacityNotActive. Capacity ... is not active"`.
+The workspace's backing capacity (`fabricn2tjinbhnbln6`, SKU F64,
+`rg-noc-iq-demo`) had auto-paused from inactivity. **Fix:**
+`az resource invoke-action --action resume --resource-type Microsoft.Fabric/capacities --name fabricn2tjinbhnbln6 -g rg-noc-iq-demo`,
+polled `properties.state` until `Active` (~90s). Not a code fix — an
+operational note: **if RTI queries ever start failing with an opaque MCP 404,
+check the Fabric capacity's power state before anything else.**
+
+### End-to-end verification (v3, capacity active)
+
+Re-ran the exact same direct-SDK question that failed live in Teams
+("alert timeline + per-sensor optical readings for LINK-SYD-MEL-FIBRE-01 /
+INC-2025-08-14-0042"). Got back a fully grounded answer: real `AlertId`s,
+real `AckedBy`/`AckedAt` values, a real BER inflection from `1.9E-12` to
+`0.0046` starting at the exact alert timestamp, correct per-sensor `PowerDbm`
+readings — no union error, no invented columns, explicit stated time window,
+and it explicitly offered to query `IncidentEvents` next rather than
+fabricating that too. `live-verify` is now considered fully proven (direct-SDK
+call exercises the identical `openai_client.responses.create()` path
+`agent.py` uses; only the OBO-token-from-Teams hop differs, which was already
+proven separately by the other 4 specialists' live Teams tests earlier this
+session).
+
+## Bicep/live-state reconciliation (this session)
+
+`gateway/infra/core/apim/apim.bicep`'s `admin-ui-gateway` API still declared the
+old `method: '*'` / `urlTemplate: '/*'` wildcard operation (`passthrough-any`) —
+the exact wildcard-operation bug documented in the table above, whose live fix
+(8 explicit per-verb operations) was applied via CLI but never ported back into
+Bicep. Replaced `passthrough-any` with the live shape: one operation per verb
+(GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS) against `urlTemplate: '/{*path}'` (with
+a declared `path` template parameter), plus a dedicated `passthrough-root-get`
+for the bare `/`. Verified the live API-level policies (`set-backend-service`
+only, no host-header override or extra rewrite-uri) already match what's in
+Bicep as-is — no further drift found there. `az bicep build` compiles clean.

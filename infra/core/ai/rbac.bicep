@@ -15,6 +15,12 @@ param principalType string = 'ServicePrincipal'
 @description('Azure AI Search service name the App Service identity needs data-plane read access to (Foundry IQ knowledge base MCP tool).')
 param searchServiceName string = ''
 
+@description('Object ID of the group/user granted OAuth identity-passthrough access to noc-topology-agent/noc-comms-agent (e.g. the noc-iq-demo-teams-users AAD group). Leave empty to skip -- see docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md for why this must be PROJECT scope, not account scope. For noc-incident-agent, these same Teams users also need separate Fabric-side workspace/Eventhouse read access (Viewer or equivalent) granted in Fabric itself; Foundry Agent Consumer alone does not bypass Fabric RBAC, and this Bicep file cannot manage those Fabric permissions.')
+param teamsUsersPrincipalId string = ''
+
+@description('Principal type of teamsUsersPrincipalId.')
+param teamsUsersPrincipalType string = 'Group'
+
 // Foundry Agents API requires PROJECT-scope RBAC, not just account scope.
 resource aiAccount 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' existing = {
   name: aiServicesAccountName
@@ -60,5 +66,23 @@ resource searchIndexDataReaderRole 'Microsoft.Authorization/roleAssignments@2022
     principalId: principalId
     principalType: principalType
     roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', '1407120a-92aa-4202-b7e9-c0e197c71c8f') // Search Index Data Reader
+  }
+}
+
+// Persisted Prompt Agents (noc-topology-agent/noc-comms-agent) use Agent-Service-
+// managed OAuth identity passthrough: the CALLING TEAMS USER's own OAuth grant is
+// what Agent Service checks, so each Teams user (or, as here, the group they
+// belong to) needs this role at PROJECT scope specifically -- an assignment
+// scoped only to the parent account is silently not honored by this data-plane
+// check, the exact same failure class documented in
+// docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md for the old toolbox design. Cross-tenant
+// token exchange is not supported for this feature.
+resource foundryAgentConsumerRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(teamsUsersPrincipalId)) {
+  scope: aiAccount::project
+  name: guid(aiAccount::project.id, teamsUsersPrincipalId, 'eed3b665-ab3a-47b6-8f48-c9382fb1dad6')
+  properties: {
+    principalId: teamsUsersPrincipalId
+    principalType: teamsUsersPrincipalType
+    roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', 'eed3b665-ab3a-47b6-8f48-c9382fb1dad6') // Foundry Agent Consumer
   }
 }

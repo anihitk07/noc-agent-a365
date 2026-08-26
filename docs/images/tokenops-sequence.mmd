@@ -1,0 +1,43 @@
+sequenceDiagram
+    autonumber
+    participant Orc as NocAgent orchestrator (agent.py)
+    participant Ledger as APIM ledger passthrough to Run Ledger container app
+    participant KA as noc-knowledge-agent (Foundry IQ)
+    participant TA as noc-topology-agent (Fabric IQ, OBO)
+    participant TI as noc-threatintel-agent (Web IQ)
+    participant CA as noc-comms-agent (Work IQ, OBO)
+
+    Note over Orc,Ledger: Once per turn: mint/reuse a run token (POST /v1/runs),<br/>run_id derived deterministically from conversation_id + activity_id
+
+    Orc->>Ledger: POST /v1/precall (run_id, agent=noc-agent, step, model,<br/>est_input_tokens) - orchestrator's own model call
+    Ledger-->>Orc: {action: allow|mutate|queue|halt, reservation_id}
+    alt halt or queue
+        Orc-->>Orc: raise _RunHaltedError -> Teams Adaptive Card ("Run paused by policy")
+    else allow / mutate
+        Orc->>Orc: self._agent.run(history) (direct to Foundry, unchanged)
+        Orc->>Ledger: POST /v1/postcall (reservation_id, real usage_details<br/>input_token_count/output_token_count)
+    end
+
+    par For each specialist the orchestrator's model decides to call
+        Orc->>Ledger: POST /v1/precall (run_id, agent=knowledge, step, model=noc-knowledge-agent, est_input_tokens)
+        Ledger-->>Orc: decision
+        Orc->>KA: responses.create(input=question) - service credential, direct to Foundry
+        KA-->>Orc: response (usage.input_tokens/output_tokens)
+        Orc->>Ledger: POST /v1/postcall (real usage)
+    and
+        Orc->>Ledger: POST /v1/precall (run_id, agent=topology, step, model=noc-topology-agent, ...)
+        Ledger-->>Orc: decision
+        Orc->>TA: responses.create(input=question) - _StaticTokenCredential(user OBO token), direct to Foundry
+        TA-->>Orc: response (or oauth_consent_request item - unaffected by any of this)
+        Orc->>Ledger: POST /v1/postcall (real usage, or failed=true on error)
+    and
+        Orc->>Ledger: POST /v1/precall (agent=threatintel, model=noc-threatintel-agent, ...)
+        Orc->>TI: responses.create(input=question) - service credential, direct to Foundry
+        TI-->>Orc: response
+        Orc->>Ledger: POST /v1/postcall (real usage)
+    and
+        Orc->>Ledger: POST /v1/precall (agent=comms, model=noc-comms-agent, ...)
+        Orc->>CA: responses.create(input=question) - _StaticTokenCredential(user OBO token), direct to Foundry
+        CA-->>Orc: response
+        Orc->>Ledger: POST /v1/postcall (real usage, or failed=true on error)
+    end

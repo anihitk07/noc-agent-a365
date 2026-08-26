@@ -1,0 +1,215 @@
+<policies>
+  <inbound>
+    <base />
+    <validate-jwt header-name="x-run-token" output-token-variable-name="runjwt"
+                  failed-validation-httpcode="403"
+                  failed-validation-error-message="Missing or invalid run token">
+      <issuer-signing-keys>
+        <key>{{RUN_TOKEN_SIGNING_KEY_NAMED_VALUE}}</key>
+      </issuer-signing-keys>
+      <issuers>
+        <issuer>run-ledger</issuer>
+      </issuers>
+    </validate-jwt>
+    <set-variable name="runId"
+      value="@(((Jwt)context.Variables[&quot;runjwt&quot;]).Claims.GetValueOrDefault(&quot;run_id&quot;,&quot;&quot;))" />
+    <set-variable name="body" value="@(context.Request.Body.As&lt;JObject&gt;(preserveContent: true))" />
+    <llm-token-limit counter-key="@((string)context.Variables[&quot;runId&quot;])"
+                     token-quota="{{RUN_TOKEN_QUOTA}}"
+                     token-quota-period="{{RUN_TOKEN_QUOTA_PERIOD}}"
+                     tokens-per-minute="{{RUN_TOKENS_PER_MINUTE}}"
+                     estimate-prompt-tokens="true"
+                     remaining-quota-tokens-header-name="x-run-remaining-tokens" />
+    <send-request mode="new" response-variable-name="decisionRes" timeout="2" ignore-error="true">
+      <set-url>{{RUN_LEDGER_BASE_URL}}/v1/precall</set-url>
+      <set-method>POST</set-method>
+      <set-header name="Content-Type">
+        <value>application/json</value>
+      </set-header>
+      <set-body>@{
+        // ponytail: this app calls the Responses API (body has "input", not "messages";
+        // "max_output_tokens", not "max_tokens"). Both field shapes are handled so a
+        // Chat-Completions caller of this same gateway API keeps working too.
+        var b = (JObject)context.Variables[&quot;body&quot;];
+        var promptSrc = (JToken)(b[&quot;input&quot;] ?? b[&quot;messages&quot;]);
+        var promptText = promptSrc == null ? &quot;&quot; : (promptSrc.Type == JTokenType.String ? (string)promptSrc : promptSrc.ToString());
+        return new JObject(
+          new JProperty(&quot;run_id&quot;, (string)context.Variables[&quot;runId&quot;]),
+          new JProperty(&quot;agent&quot;, context.Request.Headers.GetValueOrDefault(&quot;x-agent&quot;,&quot;unknown&quot;)),
+          new JProperty(&quot;step&quot;, context.Request.Headers.GetValueOrDefault(&quot;x-step&quot;,&quot;0&quot;)),
+          new JProperty(&quot;model&quot;, (string)b[&quot;model&quot;]),
+          new JProperty(&quot;est_input_tokens&quot;, promptText.Length / 4),
+          new JProperty(&quot;max_output_tokens&quot;, (int?)b[&quot;max_output_tokens&quot;] ?? (int?)b[&quot;max_tokens&quot;] ?? 1024),
+          new JProperty(&quot;prompt_hash&quot;, promptText.GetHashCode().ToString())
+        ).ToString();
+      }</set-body>
+    </send-request>
+    <set-variable name="d"
+      value="@(((IResponse)context.Variables[&quot;decisionRes&quot;]).Body.As&lt;JObject&gt;())" />
+    <choose>
+      <when condition="@((string)((JObject)context.Variables[&quot;d&quot;])[&quot;action&quot;] == &quot;halt&quot;)">
+        <return-response>
+          <set-status code="403" reason="Run halted" />
+          <set-header name="x-run-halt-reason">
+            <value>@((string)((JObject)context.Variables[&quot;d&quot;])[&quot;halt_reason&quot;])</value>
+          </set-header>
+          <set-body>@(new JObject(
+            new JProperty(&quot;error&quot;, new JObject(
+              new JProperty(&quot;code&quot;, &quot;run_halted&quot;),
+              new JProperty(&quot;message&quot;, &quot;Run budget or policy exhausted.&quot;)))
+            ).ToString())</set-body>
+        </return-response>
+      </when>
+      <when condition="@((string)((JObject)context.Variables[&quot;d&quot;])[&quot;action&quot;] == &quot;queue&quot;)">
+        <return-response>
+          <set-status code="429" reason="Run concurrency cap" />
+          <set-header name="Retry-After">
+            <value>2</value>
+          </set-header>
+        </return-response>
+      </when>
+      <when condition="@((string)((JObject)context.Variables[&quot;d&quot;])[&quot;action&quot;] == &quot;mutate&quot;)">
+        <set-body>@{
+          var b = (JObject)context.Variables[&quot;body&quot;];
+          var d = (JObject)context.Variables[&quot;d&quot;];
+          if (d[&quot;model_override&quot;] != null)  { b[&quot;model&quot;] = (string)d[&quot;model_override&quot;]; }
+          if (d[&quot;max_output_tokens&quot;] != null) {
+            if (b[&quot;input&quot;] != null) { b[&quot;max_output_tokens&quot;] = (int)d[&quot;max_output_tokens&quot;]; }
+            else { b[&quot;max_tokens&quot;] = (int)d[&quot;max_output_tokens&quot;]; }
+          }
+          if (d[&quot;inject&quot;] != null) {
+            if (b[&quot;messages&quot;] is JArray messagesArr) {
+              messagesArr.Add(new JObject(
+                new JProperty(&quot;role&quot;,&quot;system&quot;),
+                new JProperty(&quot;content&quot;,(string)d[&quot;inject&quot;])));
+            } else if (b[&quot;input&quot;] != null) {
+              // ponytail: Responses API "input" is commonly a plain string (this app sends a
+              // question string, not a role/content array) - fold the injected steer text in
+              // rather than assuming it is a JArray.
+              var existing = b[&quot;input&quot;].Type == JTokenType.String ? (string)b[&quot;input&quot;] : b[&quot;input&quot;].ToString();
+              b[&quot;input&quot;] = existing + &quot;\n\n[system]: &quot; + (string)d[&quot;inject&quot;];
+            }
+          }
+          if ((bool?)b[&quot;stream&quot;] == true &amp;&amp; b[&quot;messages&quot;] != null) {
+            b[&quot;stream_options&quot;] = new JObject(new JProperty(&quot;include_usage&quot;, true));
+          }
+          return b.ToString();
+        }</set-body>
+      </when>
+    </choose>
+    <set-variable name="reservationId"
+      value="@((string)((JObject)context.Variables[&quot;d&quot;])[&quot;reservation_id&quot;])" />
+    {{JWT_BLOCK}}
+    <set-variable name="consumerId" value="@{
+        var claimValue = context.Subscription?.Name;
+        if (&quot;{{CLIENT_AUTH_MODE}}&quot; == &quot;entra-id&quot;)
+        {
+            var jwt = context.Variables.GetValueOrDefault&lt;Jwt&gt;(&quot;entraJwt&quot;);
+                claimValue = jwt?.Claims.GetValueOrDefault(&quot;{{ENTRA_TEAM_CLAIM}}&quot;, string.Empty);
+        }
+        return string.IsNullOrEmpty(claimValue) ? &quot;anonymous&quot; : claimValue;
+    }" />
+    <set-variable name="requestDeployment" value="@{
+        var path = context.Request.OriginalUrl.Path;
+        var marker = &quot;/deployments/&quot;;
+        var start = path.IndexOf(marker, System.StringComparison.OrdinalIgnoreCase);
+        if (start &lt; 0) { return &quot;&quot;; }
+        start += marker.Length;
+        var end = path.IndexOf('/', start);
+        return end &lt; 0 ? path.Substring(start) : path.Substring(start, end - start);
+    }" />
+    <set-variable name="consumerConfigJson" value="@{
+        var encoded = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;consumer-config-json&quot;, &quot;e30=&quot;);
+        try
+        {
+            return System.Text.Encoding.UTF8.GetString(System.Convert.FromBase64String(encoded));
+        }
+        catch
+        {
+            return &quot;{}&quot;;
+        }
+    }" />
+    <set-variable name="allowedList" value="{{ALLOWED_MODELS_JSON}}" />
+    <choose>
+      <when condition="@(!((string)context.Variables[&quot;allowedList&quot;]).Contains((string)context.Variables[&quot;requestDeployment&quot;]))">
+        <return-response>
+          <set-status code="403" reason="Forbidden" />
+          <set-body>{&quot;error&quot;:{&quot;message&quot;:&quot;Requested model is not allowed for this gateway.&quot;}}</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <set-variable name="tierKey" value="@{
+        var body = (string)context.Variables[&quot;consumerConfigJson&quot;];
+        var consumer = (string)context.Variables[&quot;consumerId&quot;];
+        var probe = string.Concat(&quot;\&quot;&quot;, consumer, &quot;\&quot;:{\&quot;tier\&quot;:\&quot;&quot;);
+        var index = body.IndexOf(probe, System.StringComparison.OrdinalIgnoreCase);
+        if (index &lt; 0) { return &quot;&quot;; }
+        var start = index + probe.Length;
+        var end = body.IndexOf('&quot;', start);
+        return end &lt; 0 ? &quot;&quot; : body.Substring(start, end - start);
+    }" />
+    <set-variable name="tierTpm" value="@{
+        var tier = (string)context.Variables[&quot;tierKey&quot;];
+        return string.IsNullOrEmpty(tier) ? &quot;{{DEFAULT_TPM}}&quot; : context.Variables.GetValueOrDefault&lt;string&gt;($&quot;tier-{tier}-tpm&quot;, &quot;{{DEFAULT_TPM}}&quot;);
+    }" />
+    <set-variable name="tierQuota" value="@{
+        var tier = (string)context.Variables[&quot;tierKey&quot;];
+        return string.IsNullOrEmpty(tier) ? &quot;{{DEFAULT_QUOTA}}&quot; : context.Variables.GetValueOrDefault&lt;string&gt;($&quot;tier-{tier}-quota&quot;, &quot;{{DEFAULT_QUOTA}}&quot;);
+    }" />
+    <set-variable name="tierQuotaPeriod" value="@{
+        var tier = (string)context.Variables[&quot;tierKey&quot;];
+        return string.IsNullOrEmpty(tier) ? &quot;{{DEFAULT_QUOTA_PERIOD}}&quot; : context.Variables.GetValueOrDefault&lt;string&gt;($&quot;tier-{tier}-period&quot;, &quot;{{DEFAULT_QUOTA_PERIOD}}&quot;);
+    }" />
+    <azure-openai-token-limit counter-key="@((string)context.Variables[&quot;consumerId&quot;])" tokens-per-minute="@(int.Parse((string)context.Variables[&quot;tierTpm&quot;]))" estimate-prompt-tokens="true" />
+    <!-- ponytail: quota-by-key is intentionally omitted here. On this APIM instance/version, having
+         both azure-openai-token-limit and quota-by-key in the same policy document causes the policy
+         compiler to fail with an unhandled 500 (InternalServerError), independent of their parameters
+         or counter-key values or relative order - confirmed by isolated testing. Per-consumer cost/rate
+         governance is still enforced by azure-openai-token-limit (TPM) plus the run ledger's run-scoped
+         llm-token-limit and precall/postcall budget decisioning; a per-consumer daily call-count quota
+         was redundant with those and is dropped rather than worked around. -->
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+    <set-backend-service base-url="{{OPENAI_BASE_URL}}" />
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+    <send-one-way-request mode="new">
+      <set-url>{{RUN_LEDGER_BASE_URL}}/v1/postcall</set-url>
+      <set-method>POST</set-method>
+      <set-header name="Content-Type">
+        <value>application/json</value>
+      </set-header>
+      <set-body>@{
+        var r = context.Response.Body.As&lt;JObject&gt;(preserveContent: true);
+        var u = r[&quot;usage&quot;];
+        return new JObject(
+          new JProperty(&quot;run_id&quot;, (string)context.Variables[&quot;runId&quot;]),
+          new JProperty(&quot;reservation_id&quot;, (string)context.Variables[&quot;reservationId&quot;]),
+          new JProperty(&quot;input_tokens&quot;,  (int?)u?[&quot;input_tokens&quot;] ?? (int?)u?[&quot;prompt_tokens&quot;] ?? 0),
+          new JProperty(&quot;output_tokens&quot;, (int?)u?[&quot;output_tokens&quot;] ?? (int?)u?[&quot;completion_tokens&quot;] ?? 0),
+          new JProperty(&quot;model&quot;, (string)r[&quot;model&quot;])
+        ).ToString();
+      }</set-body>
+    </send-one-way-request>
+    <set-header name="x-gateway-backend" exists-action="override">
+      <value>openai</value>
+    </set-header>
+  </outbound>
+  <on-error>
+    <base />
+    <send-one-way-request mode="new">
+      <set-url>{{RUN_LEDGER_BASE_URL}}/v1/postcall</set-url>
+      <set-method>POST</set-method>
+      <set-header name="Content-Type">
+        <value>application/json</value>
+      </set-header>
+      <set-body>@(new JObject(
+        new JProperty(&quot;run_id&quot;,(string)context.Variables[&quot;runId&quot;]),
+        new JProperty(&quot;reservation_id&quot;,(string)context.Variables[&quot;reservationId&quot;]),
+        new JProperty(&quot;failed&quot;, true)).ToString())</set-body>
+    </send-one-way-request>
+  </on-error>
+</policies>
