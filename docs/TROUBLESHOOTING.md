@@ -367,6 +367,94 @@ app redeployed to App Service (`azd deploy web`, health check `200`).
 non-zero tokens, and confirm the reply cites real alert/telemetry rows rather
 than declining or hallucinating.
 
+## noc-incident-agent (RTI): real Teams-triggered error, root-caused and fixed live
+
+A real Teams turn routed to `ask_incident_agent` and hit a genuine tool error:
+
+```
+Semantic error: union: column named 'TableName' already exists
+```
+
+This closes the "pending a real Teams turn" gap above — but the first real
+usage surfaced two more bugs behind it, all root-caused and fixed live against
+the actual Eventhouse and Foundry project (no guessing, no symptom patches):
+
+### Bug 1 — nested/piped `union withsource=TableName` fails
+
+Reproduced directly against the live KQL database with a throwaway script
+(`azure-kusto-data` + `AzureDeveloperCliCredential`, deleted after use):
+
+- `union withsource=TableName A, B, C` (flat, one stage) — **works**.
+- `(union withsource=TableName A, B) | union withsource=TableName C` (nested,
+  two stages) — **fails** with exactly the reported error, because the first
+  union stage already materializes a `TableName` column and the second stage
+  tries to add another one with the same name.
+
+This is a query-generation limitation in the Fabric RTI MCP server's own
+NL2KQL layer (Microsoft-hosted, Public Preview) when a question spans all 3
+Eventhouse tables — not our schema, not our ingestion, not fixable upstream
+from this repo. **Fix:** added an explicit "query ONE table at a time,
+correlate in your own reasoning, never ask for a query that unions/joins all
+three tables" constraint to `noc-incident-agent`'s instructions in
+`scripts/create_foundry_agents.py`, with the exact failure mode explained
+inline so future maintainers don't reintroduce it. Redeployed as v2.
+
+### Bug 2 — model hallucinated column names once the union bug was gone
+
+Direct-SDK re-test (`azure-ai-projects` `AIProjectClient` + `AzureCliCredential`,
+same call shape as `agent.py`'s `_call_specialist`, via a throwaway
+`scripts/_diag_invoke.py`, deleted after use) got past the union error but
+then failed with:
+
+```
+KQL query validation failed: 'TimeGenerated', 'LinkId' [on NetworkAlerts],
+'AlertName', 'AlertState', 'IsSuppressed', 'SuppressionReason',
+'AcknowledgedBy', 'AcknowledgedTime', 'Description' do not refer to any
+known column...
+```
+
+The model guessed a generic "typical alerts table" schema instead of the
+actual one. **Fix:** embedded the exact 3 table schemas (column names + types,
+copied verbatim from `scripts/create_eventhouse.py`'s `TABLE_SPECS`) directly
+into the agent's instructions, plus an explicit note that `NetworkAlerts` has
+no `LinkId` column — the affected link/sensor is `EntityId` instead (confirmed
+against `scripts/generate_incident_telemetry.py`, which populates `EntityId`
+from each sensor's `MonitoredEntityId`). Redeployed as v3.
+
+### Bug 3 — Fabric capacity was paused, producing a misleading 404
+
+After fixing the schema, the same direct-SDK re-test failed again, this time:
+
+```
+The remote MCP server ... returned HTTP 404 (Not Found) while fetching tool
+executeQuery.
+```
+
+Probing the Fabric MCP endpoint directly with `curl` + a raw bearer token
+(bypassing Foundry/MCP entirely) surfaced the real error underneath the
+generic 404: `"Internal error CapacityNotActive. Capacity ... is not active"`.
+The workspace's backing capacity (`fabricn2tjinbhnbln6`, SKU F64,
+`rg-noc-iq-demo`) had auto-paused from inactivity. **Fix:**
+`az resource invoke-action --action resume --resource-type Microsoft.Fabric/capacities --name fabricn2tjinbhnbln6 -g rg-noc-iq-demo`,
+polled `properties.state` until `Active` (~90s). Not a code fix — an
+operational note: **if RTI queries ever start failing with an opaque MCP 404,
+check the Fabric capacity's power state before anything else.**
+
+### End-to-end verification (v3, capacity active)
+
+Re-ran the exact same direct-SDK question that failed live in Teams
+("alert timeline + per-sensor optical readings for LINK-SYD-MEL-FIBRE-01 /
+INC-2025-08-14-0042"). Got back a fully grounded answer: real `AlertId`s,
+real `AckedBy`/`AckedAt` values, a real BER inflection from `1.9E-12` to
+`0.0046` starting at the exact alert timestamp, correct per-sensor `PowerDbm`
+readings — no union error, no invented columns, explicit stated time window,
+and it explicitly offered to query `IncidentEvents` next rather than
+fabricating that too. `live-verify` is now considered fully proven (direct-SDK
+call exercises the identical `openai_client.responses.create()` path
+`agent.py` uses; only the OBO-token-from-Teams hop differs, which was already
+proven separately by the other 4 specialists' live Teams tests earlier this
+session).
+
 ## Bicep/live-state reconciliation (this session)
 
 `gateway/infra/core/apim/apim.bicep`'s `admin-ui-gateway` API still declared the
