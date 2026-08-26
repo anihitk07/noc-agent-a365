@@ -234,6 +234,56 @@ separate, manual post-deployment step -- Fabric permissions are not currently
 ARM/Bicep-managed, so they are intentionally not granted by any file under
 `infra/`.
 
+### 4e. Fabric RTI — Eventhouse, incident telemetry, and the RTI connection (required for `noc-incident-agent`)
+
+`noc-incident-agent` is the 5th specialist (real-time incident evidence: alert
+timelines, per-sensor optical readings, suppressed alerts). It needs its own
+Eventhouse (KQL database), seeded telemetry, and its own project connection.
+None of this is Bicep-managed -- run these against a fresh environment:
+
+```bash
+cd scripts
+python generate_incident_telemetry.py   # writes data/telemetry/*.csv (already committed; re-run only if tickets/sensors change)
+python create_eventhouse.py             # creates NOCIncidentEventhouse + KQL DB in the same Fabric workspace as §4, ingests the 3 CSVs, writes FABRIC_EVENTHOUSE_ID/FABRIC_KQL_DB_ID/FABRIC_RTI_MCP_URL to .env
+python create_rti_connection.py         # creates the fabric-rti-connection project connection (authType=UserEntraToken), target = FABRIC_RTI_MCP_URL
+```
+
+`create_eventhouse.py` is idempotent (create-or-get eventhouse/DB, then
+`.clear table` + re-ingest each of the 3 demo tables, so reruns don't
+duplicate rows). Grant Teams users Fabric access per §4d before expecting the
+agent to return data for a real user.
+
+> **Gotcha — Fabric capacity can auto-pause.** If RTI queries fail with an
+> opaque MCP `HTTP 404 (Not Found)` (not a KQL/semantic error), the *first*
+> thing to check is whether the backing Fabric capacity has been paused
+> (billing/inactivity):
+> ```bash
+> az resource show --resource-type Microsoft.Fabric/capacities --name <capacity-name> -g <rg> --query properties.state -o tsv
+> az resource invoke-action --action resume --resource-type Microsoft.Fabric/capacities --name <capacity-name> -g <rg>
+> ```
+> Poll `properties.state` until `Active` (~60-90s) before retrying. See
+> `docs/TROUBLESHOOTING.md` for the full root-cause writeup (this 404 has no
+> obvious connection to capacity state in the error text itself).
+
+### 4f. Create the 5 Foundry Prompt Agent specialists (required, run after all connections above exist)
+
+```bash
+cd scripts
+python create_foundry_agents.py
+```
+
+Creates/updates `noc-knowledge-agent`, `noc-topology-agent`,
+`noc-threatintel-agent`, `noc-comms-agent`, and `noc-incident-agent` as
+persisted Foundry Prompt Agents, each with exactly one MCP tool bound to the
+connection created above (`kb-mcp-connection`, `fabric-iq-connection`,
+`web-iq-connection`, `WorkIQ`, `fabric-rti-connection` respectively). It's
+idempotent: it diffs each agent's live latest-version definition
+(instructions/model/tool) against what it would create and skips any agent
+that's already up to date, only publishing a new version where something
+actually changed. `agent/agent.py`'s `SPECIALIST_AGENTS` map resolves these
+five by name at startup -- run this **before** step 8 on a fresh environment,
+or the orchestrator's tool calls will fail with "agent not found".
+
 ## 5. Web IQ
 
 Provisioned automatically by Bicep if `webIqApiKey` was set in step 2 -- no
