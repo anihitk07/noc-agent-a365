@@ -723,9 +723,14 @@ any of them recur on a different tenant.
 destructive and irreversible.**
 
 ```bash
-# 1. Delete the Fabric workspace (tenant object, not part of the RG)
-#    Fabric portal → workspace settings → Remove this workspace
-#    or: az rest --method delete --url "https://api.fabric.microsoft.com/v1/workspaces/$FABRIC_WORKSPACE_ID"
+# 1. Delete the Fabric workspace (tenant object, not part of the RG -- az group
+#    delete never touches it, and it will keep billing the capacity if skipped)
+cd scripts
+python delete_fabric_workspace.py          # dry-run: prints what it would delete
+python delete_fabric_workspace.py --yes    # actually deletes the workspace
+#    (deleting the workspace cascades to the lakehouse, ontology, Data Agent,
+#    and the RTI Eventhouse + KQL database in one call -- no per-item cleanup needed)
+cd ..
 
 # 2. Decommission the A365 teammate account
 a365 teardown   # or remove the agentic user + blueprint via the M365 admin center
