@@ -284,7 +284,7 @@ Fabric Eventhouse. Outcome: **B2-c — not attachable.**
 
 
 See `docs/OUTBOUND_NOTIFICATIONS.md`'s "Live E2E test results" section for
-full detail and the Accenture-facing writeup. Summary table:
+full detail and the partner-facing writeup. Summary table:
 
 | Symptom | Cause | Fix |
 |---|---|---|
