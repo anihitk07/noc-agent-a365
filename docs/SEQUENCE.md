@@ -225,6 +225,35 @@ way; only the transport of the *governed* call itself (direct vs. through
 APIM) differs, and that choice is driven purely by which of the two blockers
 above applies to that specialist.
 
+**Latency contract, verified against `agent.py` (`_run_ledger_precall` /
+`_run_ledger_postcall`, `_call_specialist`, `process_user_message`)**:
+
+- Both calls are `async def`, made with `httpx.AsyncClient`, and are `await`ed
+  on Python's event loop rather than blocking a thread — so while one
+  specialist's precall/postcall is in flight, every other concurrently
+  running specialist coroutine (and the orchestrator itself) keeps making
+  progress. This is what makes the `par` block above genuinely parallel: the
+  5 precall→call→postcall triplets don't serialize against each other.
+- `precall` is a real, intentional gate: it is awaited **before** the model
+  call and its `allow`/`mutate`/`queue`/`halt` decision can change what
+  happens next (steer down `max_output_tokens`, or raise `_RunHaltedError`) —
+  so it does add its own small latency to that specific call's critical
+  path, by design.
+- `postcall` is "best-effort" **only in its error handling** — on any
+  exception it logs a warning and swallows it (`_run_ledger_postcall`'s
+  docstring: "never raises"), so a down run ledger degrades accounting
+  accuracy, not the turn. It is still `await`ed inline before
+  `_call_specialist`/`process_user_message` returns, so it is not a
+  fire-and-forget `asyncio.create_task` — it is a second small,
+  in-VNet HTTP hop per call (`RUN_LEDGER_CREATE_TIMEOUT_SECONDS`, default
+  2s ceiling, typically far faster).
+- Net effect on what the user actually waits for: negligible. Each Foundry
+  `responses.create()` call this wraps runs tens of seconds; the precall +
+  postcall pair adds at most a couple of fast internal HTTP round-trips
+  around it, and — because the 5 specialists run concurrently — that
+  overhead never stacks up across specialists, only (trivially) within each
+  one's own path.
+
 ## 4. The 6 narrative beats this sequence must produce
 
 
@@ -301,6 +330,16 @@ Steps 13-27 (5 precall→call→postcall triplets) run in parallel — governed
 identically whether the specialist authenticates as the service or via OBO
 passthrough; only the transport of the *governed* call differs (direct to
 Foundry either way), never the ledger accounting.
+
+All precall/postcall calls (steps 7, 11, 13, 15, 16, 18, 19, 21, 22, 24, 25,
+27) are `async`/`await`ed `httpx` calls, never blocking threads — so they
+don't serialize the 5 parallel specialist paths against each other. `precall`
+is an intentional gate awaited before its model call (it can steer/halt that
+call); `postcall` is best-effort only in its *error handling* (never fails
+the turn on a ledger outage), but is still awaited inline as a fast in-VNet
+hop (≤2s timeout, usually much faster) before the specialist returns — a
+rounding error next to the tens-of-seconds Foundry call it wraps. See §3's
+"Latency contract" note for the full detail.
 
 ### Part 2 — asynchronous, out-of-band (not tied to any single Teams turn)
 
