@@ -154,28 +154,26 @@ deepest root cause found during this deployment's troubleshooting (see
 auto-provisioned agent-user child identity, but that identity starts with
 **zero access to Fabric** — every Fabric IQ call will fail (`AADSTS65001:
 consent_required`, then, once consent is fixed, a Fabric workspace-RBAC
-403) until both of the following are done. Run these once the Agent Identity
-exists (after step 9), using an account with Global Admin / Fabric admin
-rights:
+403) until this is granted. None of this is ARM/Bicep-manageable (Entra
+tenant-wide consent grants and Fabric workspace role assignments are not ARM
+resource types), so it's automated instead as a single idempotent script,
+`scripts/grant_agent_identity_access.py` (see §4d/§6a/§6b — it also covers
+those). Set the two required env vars once the Agent Identity exists (after
+step 9), using an account with Global Admin / Fabric admin rights:
 
 ```bash
-# 1. Tenant admin-consent grant for the Fabric/Power BI API's delegated
-#    scopes (there is no classic app registration object for an Agent
-#    Identity, so the portal's "API permissions" UI doesn't apply --
-#    grant directly via Graph).
-FABRIC_SP_ID=$(az ad sp show --id https://api.fabric.microsoft.com --query id -o tsv)
-az rest --method post --url https://graph.microsoft.com/v1.0/oauth2PermissionGrants \
-  --body "{\"clientId\": \"<agent identity object id>\", \"consentType\": \"AllPrincipals\", \"resourceId\": \"$FABRIC_SP_ID\", \"scope\": \"DataAgent.Read.All DataAgent.Execute.All\"}"
-
-# 2. Add the agent-user identity as a member of the Fabric workspace itself
-#    (tenant-wide API consent is separate from per-workspace RBAC).
-az rest --method post --url "https://api.fabric.microsoft.com/v1/workspaces/<workspaceId>/roleAssignments" \
-  --body "{\"principal\": {\"id\": \"<agent-user object id>\", \"type\": \"User\"}, \"role\": \"Contributor\"}"
+# AGENT_IDENTITY_OBJECT_ID / AGENT_USER_OBJECT_ID -- see docs/TROUBLESHOOTING.md's
+# "Auth-type mistakes" section for how to find them (visible as `agentic_user_id`
+# in Application Insights `traces` once a user has messaged the agent once).
+echo "AGENT_IDENTITY_OBJECT_ID=<agent identity object id>" >> .env
+echo "AGENT_USER_OBJECT_ID=<agent-user object id>" >> .env
+python scripts/grant_agent_identity_access.py
 ```
 
-See `docs/TROUBLESHOOTING.md`'s "Auth-type mistakes" section for how to find
-the agent identity/agent-user object ids (visible as `agentic_user_id` in
-Application Insights `traces` once a user has messaged the agent once).
+This grants the Fabric tenant admin-consent (`DataAgent.Read.All`/
+`DataAgent.Execute.All`) and adds the agent-user identity as a `Contributor`
+on the Fabric workspace — safely re-runnable any time (it checks existing
+grants/role assignments before writing).
 
 ### 4c. Create the Fabric IQ + Work IQ Foundry project connections (automated)
 
@@ -215,6 +213,77 @@ bare `500`; both connection scripts retry automatically.)
 After running it, **restart the app** (`az webapp restart`) so `agent.py`'s
 `initialize()` re-reads the connections and rebuilds the toolbox with all 4
 tools -- it only resolves connections once, at process startup.
+
+### 4d. Grant Teams users Fabric workspace/Eventhouse read access (required for `noc-incident-agent`)
+
+`noc-incident-agent` uses the same per-user OBO identity passthrough pattern
+as the other Fabric-backed specialists (`needs_user_identity=True` in
+`agent/agent.py`), so the calling Teams user's own Fabric permissions are
+what Eventhouse enforces at query time. The Foundry project role assignments
+above (for example `Foundry Agent Consumer`) are **not** enough on their own:
+after deployment, a Fabric admin must also grant each Teams user -- or, more
+typically, an AAD group they belong to -- at least **Viewer** (or the
+equivalent read role your tenant uses) on the Fabric workspace that contains
+the Eventhouse/item the agent queries.
+
+Fabric workspace RBAC is not an ARM resource type, so it's still not
+Bicep-managed, but it's now scripted (same script as §4b): set
+`TEAMS_USERS_GROUP_ID` to the AAD group your Teams users belong to (the same
+group id passed as `teamsUsersPrincipalId` to `infra/core/ai/rbac.bicep`) and
+re-run `python scripts/grant_agent_identity_access.py` -- it grants that group
+`Viewer` on the Fabric workspace, skipping if already granted. If
+`TEAMS_USERS_GROUP_ID` is unset, the script skips this step and you must grant
+it manually in the Fabric portal (**Workspace -> Manage access**) instead.
+
+### 4e. Fabric RTI — Eventhouse, incident telemetry, and the RTI connection (required for `noc-incident-agent`)
+
+`noc-incident-agent` is the 5th specialist (real-time incident evidence: alert
+timelines, per-sensor optical readings, suppressed alerts). It needs its own
+Eventhouse (KQL database), seeded telemetry, and its own project connection.
+None of this is Bicep-managed -- run these against a fresh environment:
+
+```bash
+cd scripts
+python generate_incident_telemetry.py   # writes data/telemetry/*.csv (already committed; re-run only if tickets/sensors change)
+python create_eventhouse.py             # creates NOCIncidentEventhouse + KQL DB in the same Fabric workspace as §4, ingests the 3 CSVs, writes FABRIC_EVENTHOUSE_ID/FABRIC_KQL_DB_ID/FABRIC_RTI_MCP_URL to .env
+python create_rti_connection.py         # creates the fabric-rti-connection project connection (authType=UserEntraToken), target = FABRIC_RTI_MCP_URL
+```
+
+`create_eventhouse.py` is idempotent (create-or-get eventhouse/DB, then
+`.clear table` + re-ingest each of the 3 demo tables, so reruns don't
+duplicate rows). Grant Teams users Fabric access per §4d before expecting the
+agent to return data for a real user.
+
+> **Gotcha — Fabric capacity can auto-pause.** If RTI queries fail with an
+> opaque MCP `HTTP 404 (Not Found)` (not a KQL/semantic error), the *first*
+> thing to check is whether the backing Fabric capacity has been paused
+> (billing/inactivity):
+> ```bash
+> az resource show --resource-type Microsoft.Fabric/capacities --name <capacity-name> -g <rg> --query properties.state -o tsv
+> az resource invoke-action --action resume --resource-type Microsoft.Fabric/capacities --name <capacity-name> -g <rg>
+> ```
+> Poll `properties.state` until `Active` (~60-90s) before retrying. See
+> `docs/TROUBLESHOOTING.md` for the full root-cause writeup (this 404 has no
+> obvious connection to capacity state in the error text itself).
+
+### 4f. Create the 5 Foundry Prompt Agent specialists (required, run after all connections above exist)
+
+```bash
+cd scripts
+python create_foundry_agents.py
+```
+
+Creates/updates `noc-knowledge-agent`, `noc-topology-agent`,
+`noc-threatintel-agent`, `noc-comms-agent`, and `noc-incident-agent` as
+persisted Foundry Prompt Agents, each with exactly one MCP tool bound to the
+connection created above (`kb-mcp-connection`, `fabric-iq-connection`,
+`web-iq-connection`, `WorkIQ`, `fabric-rti-connection` respectively). It's
+idempotent: it diffs each agent's live latest-version definition
+(instructions/model/tool) against what it would create and skips any agent
+that's already up to date, only publishing a new version where something
+actually changed. `agent/agent.py`'s `SPECIALIST_AGENTS` map resolves these
+five by name at startup -- run this **before** step 8 on a fresh environment,
+or the orchestrator's tool calls will fail with "agent not found".
 
 ## 5. Web IQ
 
@@ -315,25 +384,25 @@ Beyond the `authType: UserEntraToken` connection above, Work IQ calls
 needs tenant admin consent for the 7 Graph delegated scopes Work IQ requires —
 without this, every Work IQ call fails with a generic MCP `"Cancelled via
 cancel scope"` error (the real `AADSTS65001` never surfaces in this app's own
-traces, since the failure happens server-side inside Work IQ). Run once,
-after `a365 setup all` (step 9) has created the Agent Identity:
+traces, since the failure happens server-side inside Work IQ). This is the
+same `scripts/grant_agent_identity_access.py` script as §4b — if you already
+ran it there, this is already done:
 
 ```bash
-GRAPH_SP_ID=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
-az rest --method post --url https://graph.microsoft.com/v1.0/oauth2PermissionGrants \
-  --body "{\"clientId\": \"<agent identity object id>\", \"consentType\": \"AllPrincipals\", \"resourceId\": \"$GRAPH_SP_ID\", \"scope\": \"Sites.Read.All Mail.Read People.Read.All OnlineMeetingTranscript.Read.All Chat.Read ChannelMessage.Read.All ExternalItem.Read.All\"}"
+python scripts/grant_agent_identity_access.py
 ```
 
 ### 6b. (Optional) Grant `Mail.Send` for outbound persona notifications
 
 **Only needed if you use `agent/notifications.py`'s outbound broadcast**
 (`POST /api/incidents/notify` — see docs/OUTBOUND_NOTIFICATIONS.md). This is
-a separate, additive consent — same Graph SP, same `oauth2PermissionGrants`
-call pattern as 6a, just re-run with `Mail.Send` appended to `scope`:
+a separate, additive consent — set `GRANT_MAIL_SEND=true` in `.env` and
+re-run the same script; it merges `Mail.Send` into the existing grant's
+scope instead of clobbering the 7 scopes already granted in §6a:
 
 ```bash
-az rest --method post --url https://graph.microsoft.com/v1.0/oauth2PermissionGrants \
-  --body "{\"clientId\": \"<agent identity object id>\", \"consentType\": \"AllPrincipals\", \"resourceId\": \"$GRAPH_SP_ID\", \"scope\": \"Sites.Read.All Mail.Read Mail.Send People.Read.All OnlineMeetingTranscript.Read.All Chat.Read ChannelMessage.Read.All ExternalItem.Read.All\"}"
+echo "GRANT_MAIL_SEND=true" >> .env
+python scripts/grant_agent_identity_access.py
 ```
 
 The agentic user identity (`nocagent@<tenant>`) has a real mailbox, so
@@ -523,60 +592,36 @@ Use the dedicated Agents surface instead:
 
 ## 9c. Grant the agentic user identity the Foundry project RBAC roles
 
-**Required — without this, every turn fails, either with a 403 on the
-Responses API call or with a misleading `"Cancelled via cancel scope ..."`
-error on the toolbox MCP call (an anyio/MCP-library quirk that mis-surfaces
-a plain data-plane 403 as a task-cancellation error — see
+**Now automated by `infra/core/ai/rbac.bicep`** — pass the AAD group your
+Teams users belong to (e.g. `noc-iq-demo-teams-users`) as
+`teamsUsersPrincipalId` (with `teamsUsersPrincipalType=Group`) to `azd
+provision`/`azd up`, and all 5 project-scoped roles below are assigned
+automatically, every deploy, with no manual `az role assignment create`
+needed:
+
+- `Foundry Agent Consumer`
+- `Azure AI Developer`
+- `Foundry Project Runtime User`
+- `Cognitive Services OpenAI User`
+- `Cognitive Services User`
+
+This remains **required** without which every turn fails, either with a 403
+on the Responses API call or with a misleading `"Cancelled via cancel scope
+..."` error on the toolbox MCP call (an anyio/MCP-library quirk that
+mis-surfaces a plain data-plane 403 as a task-cancellation error — see
 `docs/TROUBLESHOOTING.md`'s "Auth-type mistakes" entry and
-`docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md`).** The chat client/agent are built
-with a fixed **service** credential (the app's managed identity), but
-Fabric IQ/Work IQ's `UserEntraToken` connections still need OBO identity
+`docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md`). The chat client/agent are built with
+a fixed **service** credential (the app's managed identity), but Fabric
+IQ/Work IQ/RTI's `UserEntraToken` connections still need OBO identity
 passthrough for the calling Teams user — handled one layer down, at the
 per-turn MCP tool's `header_provider` (see `docs/ARCHITECTURE.md`). That
 means the calling Teams user's own agentic identity also needs RBAC **on
 the Foundry project** — a separate surface from anything the app's managed
 identity holds on the Cognitive Services account, AND separate from
 account-scope RBAC (an assignment scoped only to the parent account is
-**not** honored by either data-plane call below; it must be scoped to the
-project resource itself).
-
-Two independent API surfaces need their own roles at the project scope:
-
-**For the toolbox MCP endpoint** (every tool call — this is what the
-"cancel scope" error above actually was):
-
-```bash
-az role assignment create \
-  --assignee-object-id <agentic_user_id> \
-  --assignee-principal-type User \
-  --role "Azure AI Developer" \
-  --scope <Foundry project ARM resource id>
-```
-
-**For the direct Responses API call** (the chat completion itself):
-
-```bash
-az role assignment create \
-  --assignee-object-id <agentic_user_id> \
-  --assignee-principal-type User \
-  --role "Foundry Agent Consumer" \
-  --scope <Foundry project ARM resource id>
-az role assignment create \
-  --assignee-object-id <agentic_user_id> \
-  --assignee-principal-type User \
-  --role "Cognitive Services OpenAI User" \
-  --scope <Foundry project ARM resource id>
-az role assignment create \
-  --assignee-object-id <agentic_user_id> \
-  --assignee-principal-type User \
-  --role "Cognitive Services User" \
-  --scope <Foundry project ARM resource id>
-az role assignment create \
-  --assignee-object-id <agentic_user_id> \
-  --assignee-principal-type User \
-  --role "Foundry Project Runtime User" \
-  --scope <Foundry project ARM resource id>
-```
+**not** honored; it must be scoped to the project resource itself, which is
+exactly how `rbac.bicep` scopes these — see `aiAccount::project` in that
+file).
 
 **`Foundry Project Runtime User` is the role that actually matters for this
 call pattern** — it is the only one of the four whose `dataActions` include
@@ -584,21 +629,25 @@ call pattern** — it is the only one of the four whose `dataActions` include
 surface a direct (non-`agent_reference`) Responses API call hits. The other
 three are kept as belt-and-suspenders but were confirmed, by direct
 inspection of each role's `dataActions` via `az role definition list`, not to
-cover this action alone. If a future cleanup pass reconfirms
-`Foundry Project Runtime User` alone is sufficient, the other three can be
-dropped to keep the RBAC model minimal.
+cover this action alone.
 
-**Assign to an AAD group instead of per-user, to avoid repeating this for
-every new user.** Rather than repeating all of the above for each new
-distinct human user's auto-provisioned agentic identity, create/use an AAD
-group (e.g. `noc-iq-demo-teams-users`), add every Teams user who should
-have access as a member, and run each `az role assignment create` above
-once with `--assignee-object-id <group_object_id> --assignee-principal-type
-Group` instead of a per-user `--assignee-object-id`/`User`. New users then
-just need adding to the group — no new role assignment. RBAC propagation
-can still take a couple of minutes before the next turn succeeds either way.
-See `docs/TROUBLESHOOTING.md`'s "Foundry project RBAC" entry for the full
+**Always assign `teamsUsersPrincipalId` to an AAD group, never an
+individual user** — new users then just need adding to the group; no
+redeploy or new role assignment is needed. RBAC propagation can still take
+a couple of minutes before the next turn succeeds either way. See
+`docs/TROUBLESHOOTING.md`'s "Foundry project RBAC" entry for the full
 symptom/diagnosis of the Responses API case.
+
+If you can't redeploy immediately and need a stop-gap for an existing
+environment, the equivalent one-off command per role is still:
+
+```bash
+az role assignment create \
+  --assignee-object-id <group_or_agentic_user_id> \
+  --assignee-principal-type Group \
+  --role "<role name from the list above>" \
+  --scope <Foundry project ARM resource id>
+```
 
 ## 10. Verify end-to-end
 
