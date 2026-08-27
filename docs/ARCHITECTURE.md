@@ -1,5 +1,29 @@
 # Architecture
 
+## Why these Azure/Fabric components
+
+| Component | Why it was chosen here | Advantage it brings |
+|---|---|---|
+| **Azure AI Foundry** (persisted Prompt Agents) | Each IQ surface needs its own model, instructions, and single MCP tool, independently versioned — a plain client-side agent can't do that without hand-rolling routing/versioning | Server-side tool execution, per-agent `create_version` history/rollback, and built-in OAuth-consent surfacing (`oauth_consent_request`) instead of a hand-rolled consent flow |
+| **Microsoft Fabric** (Lakehouse + Ontology + Data Agent, plus Eventhouse for RTI) | The network topology graph and live incident telemetry are both naturally graph/time-series data that already has a home in Fabric for this org, with per-user RBAC enforced at the data layer | One platform for both the *static* topology graph (Fabric IQ) and the *live* event stream (RTI IQ / Eventhouse+KQL), each enforcing the calling user's own permissions — no separate per-user authZ layer to build |
+| **Fabric RTI Eventhouse (KQL DB)** specifically | Alert/optical telemetry is high-volume, time-series, ad-hoc-queryable data — exactly KQL's design target | Sub-second queries over hundreds of thousands of rows, a hosted remote MCP endpoint (no stdio bridge/sidecar to build or run) |
+| **Azure AI Search** (Foundry IQ) | Runbooks/tickets/specs are static prose that needs semantic + keyword retrieval, not a live query engine | Managed vector + keyword hybrid search, no infrastructure to run, integrates natively as a Foundry knowledge-base tool |
+| **Azure Cosmos DB** (TokenOps `gateway/config` container) | Governance config (quotas, allowed models, per-model pricing) is small, low-write-volume, needs strong read consistency for the worker/BFF, and must stay private | Single source of desired-state truth with a simple per-consumer/document model; private-endpoint-only by default, matching this app's "never expose config data publicly" requirement |
+| **Azure Container Apps Jobs** (config-sync-worker) | This is a scheduled batch reconciliation loop (Cosmos → Retail Prices API → APIM), not a long-running service | Pulls `:latest` fresh on every `job start` (no revision-suffix redeploy dance), scales to zero between runs — cheaper than a long-running Container App for a periodic job |
+| **Azure Container Apps** (Admin UI, Run Ledger) | Both need a long-running HTTP surface with VNet integration/internal-only ingress, without the overhead of AKS | Internal-only ingress keeps the run ledger unreachable except via the deliberate APIM pass-through; simpler ops than a full cluster for two small services |
+| **Azure API Management** (`/ledger` pass-through, `openai-gateway`/`foundry-gateway`) | App Service isn't VNet-integrated and can't reach the internal-only run ledger directly; APIM already is VNet-injected | A thin, already-provisioned reverse-proxy hop reaches the internal Container App with no body inspection — reused for governance transport without inheriting the OAuth-passthrough/body-shape blockers a full policy-enforcement hop would hit (see SEQUENCE.md §3) |
+| **Azure Bot Service** | Standard, supported channel connector for getting a Teams/M365 Copilot message into any web app | Carries the A365 teammate identity needed for on-behalf-of user tokens, and Bot Framework Activity JSON is what the Agents SDK already expects |
+| **Azure App Service (Linux)** | The orchestrator is a stateless, HTTP-triggered Python web app with no need for containers, scaling policies, or a cluster | Simplest, cheapest compute that satisfies "one always-on endpoint", with `az` /`azd deploy` ergonomics already used across this repo |
+| **Application Insights + Log Analytics** | Every specialist call already emits `response.usage`; need queryable, retained telemetry for both tracing and the `usage_event`/cost KQL queries | One place for both distributed tracing (`verify-e2e`) and ad-hoc cost/usage KQL, no separate telemetry pipeline to stand up |
+| **Azure Retail Prices API** | Real per-model $/token pricing must come from somewhere authoritative, not be hand-maintained | Free, no-auth public API, always current — removes an entire class of "stale hardcoded price" bugs (the exact bug this session found and fixed) |
+
+The common thread: every choice above is the platform default for its job —
+managed/serverless where the workload is bursty or periodic (Jobs, Search,
+Retail Prices API), a private data store where the data is sensitive
+(Cosmos), and Foundry/Fabric's own native constructs (Prompt Agents, Data
+Agent, Eventhouse) wherever the alternative would mean re-implementing
+identity passthrough, versioning, or query performance by hand.
+
 ## Summary
 
 `noc-agent-a365` is a Teams / M365 Copilot–native NOC (Network Operations
