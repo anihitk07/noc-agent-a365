@@ -272,7 +272,7 @@ here since they were silent (no error at request time):
 ## Outbound email-trigger notification bugs (found during live e2e testing, all fixed)
 
 See `docs/OUTBOUND_NOTIFICATIONS.md`'s "Live E2E test results" section for
-full detail and the Accenture-facing writeup. Summary table:
+full detail and the partner-facing writeup. Summary table:
 
 | Symptom | Cause | Fix |
 |---|---|---|

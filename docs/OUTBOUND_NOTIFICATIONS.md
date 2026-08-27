@@ -1,6 +1,6 @@
 # Outbound Multi-Persona Incident Notifications
 
-> Answers the Accenture review questions on agent-initiated outbound email.
+> Answers the partner review questions on agent-initiated outbound email.
 > Code: `agent/notifications.py`, `agent.py`'s `broadcast_incident_update()`,
 > `host_agent_server.py`'s `POST /api/incidents/notify`. Templates:
 > `agent/data/runbooks/customer_communication_template.md` §"Persona
@@ -434,7 +434,7 @@ reachable once the previous one was fixed:
 and body fully substituted, with the sender correctly shown in `Cc`, and no
 `{Placeholder}` text or leaked content remaining — across all 4 personas.
 
-## Limitations (PoC-honest, read before Accenture builds further)
+## Limitations (PoC-honest, read before this is built further)
 
 - **In-memory conversation storage.** `ProactiveOptions(storage=self.storage)`
   reuses the same `MemoryStorage()` as the rest of this PoC — every stored
