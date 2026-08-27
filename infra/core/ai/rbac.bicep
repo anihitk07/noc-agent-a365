@@ -86,3 +86,56 @@ resource foundryAgentConsumerRole 'Microsoft.Authorization/roleAssignments@2022-
     roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', 'eed3b665-ab3a-47b6-8f48-c9382fb1dad6') // Foundry Agent Consumer
   }
 }
+
+// The toolbox MCP endpoint (every tool call the calling Teams user's OBO identity
+// makes) is a SEPARATE data-plane check from foundryAgentConsumerRole above --
+// discovered live when Foundry Agent Consumer alone still 403'd on the MCP
+// "Cancelled via cancel scope" path. See docs/TROUBLESHOOTING.md "Foundry project
+// RBAC: the caller of the Responses API needs its own role".
+resource teamsUsersAiDeveloperRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(teamsUsersPrincipalId)) {
+  scope: aiAccount::project
+  name: guid(aiAccount::project.id, teamsUsersPrincipalId, '64702f94-c441-49e6-a78b-ef80e0188fee')
+  properties: {
+    principalId: teamsUsersPrincipalId
+    principalType: teamsUsersPrincipalType
+    roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee') // Azure AI Developer
+  }
+}
+
+// Foundry Project Runtime User is the role that actually matters for a DIRECT
+// (non-agent_reference) Responses API call -- confirmed by inspecting every
+// candidate role's dataActions live: it's the only one whose dataActions
+// include Microsoft.CognitiveServices/accounts/AIServices/responses/*, the
+// exact action `openai_client.responses.create(...)` hits in agent.py. The two
+// roles below it are kept as belt-and-suspenders (tried first, live, before
+// this one was found) -- a future cleanup pass could drop them if reconfirmed
+// unnecessary, but they're cheap to keep and remove any doubt.
+resource teamsUsersFoundryProjectRuntimeUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(teamsUsersPrincipalId)) {
+  scope: aiAccount::project
+  name: guid(aiAccount::project.id, teamsUsersPrincipalId, '142bfaed-a13f-4c2d-bed2-6db62c4a1009')
+  properties: {
+    principalId: teamsUsersPrincipalId
+    principalType: teamsUsersPrincipalType
+    roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', '142bfaed-a13f-4c2d-bed2-6db62c4a1009') // Foundry Project Runtime User
+  }
+}
+
+resource teamsUsersCognitiveServicesOpenAiUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(teamsUsersPrincipalId)) {
+  scope: aiAccount::project
+  name: guid(aiAccount::project.id, teamsUsersPrincipalId, '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')
+  properties: {
+    principalId: teamsUsersPrincipalId
+    principalType: teamsUsersPrincipalType
+    roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd') // Cognitive Services OpenAI User
+  }
+}
+
+resource teamsUsersCognitiveServicesUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(teamsUsersPrincipalId)) {
+  scope: aiAccount::project
+  name: guid(aiAccount::project.id, teamsUsersPrincipalId, 'a97b65f3-24c7-4388-baec-2e87135dc908')
+  properties: {
+    principalId: teamsUsersPrincipalId
+    principalType: teamsUsersPrincipalType
+    roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908') // Cognitive Services User
+  }
+}

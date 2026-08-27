@@ -171,13 +171,13 @@ param rateTiers object = {
   }
 }
 
-@description('Managed identities granted Cosmos DB Built-in Data Reader on the gateway account.')
+@description('EXTRA managed identities (beyond the worker/admin-ui identities below, which are always wired in automatically) granted Cosmos DB Built-in Data Reader on the gateway account.')
 param readerPrincipals principalRef[] = []
 
-@description('Managed identities granted Cosmos DB Built-in Data Contributor on the team_subscription_map and config containers.')
+@description('EXTRA managed identities (beyond config-sync-worker, which is always wired in automatically) granted Cosmos DB Built-in Data Contributor on the team_subscription_map and config containers.')
 param writerPrincipals principalRef[] = []
 
-@description('Managed identities granted Cosmos DB Built-in Data Contributor on the config container only.')
+@description('EXTRA managed identities (beyond the admin UI, which is always wired in automatically) granted Cosmos DB Built-in Data Contributor on the config container only.')
 param configWriterPrincipals principalRef[] = []
 
 @description('Full image reference for the config-sync worker. Empty skips the Container Apps Job.')
@@ -346,8 +346,16 @@ module cosmos 'core/config/cosmos.bicep' = {
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     privateDnsZoneId: network.outputs.cosmosPrivateDnsZoneId
     readerPrincipals: readerPrincipals
-    writerPrincipals: writerPrincipals
-    configWriterPrincipals: configWriterPrincipals
+    // config-sync-worker upserts into `config`/`team_subscription_map`; the admin UI writes
+    // `config` only -- both identities always exist (identities.bicep is unconditional), so
+    // wire them in automatically instead of requiring a manual `az cosmosdb sql role
+    // assignment create` after every fresh deploy.
+    writerPrincipals: concat(writerPrincipals, [
+      { name: 'config-sync-worker', principalId: identities.outputs.workerPrincipalId }
+    ])
+    configWriterPrincipals: concat(configWriterPrincipals, [
+      { name: 'admin-ui', principalId: identities.outputs.adminUiPrincipalId }
+    ])
   }
 }
 

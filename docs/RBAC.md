@@ -31,14 +31,25 @@ data-plane check (`docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md`,
 | App Service managed identity | Cognitive Services User | `a97b65f3-24c7-4388-baec-2e87135dc908` | Foundry project | Generic model-invocation permission. |
 | App Service managed identity | Search Index Data Reader | `1407120a-92aa-4202-b7e9-c0e197c71c8f` | Azure AI Search service | Foundry IQ's knowledge-base MCP tool queries Search directly with the app's own credential — **missing this caused every session to fail with a masked "Cancelled via cancel scope" error** (see below). |
 | `teamsUsersPrincipalId` (AAD group, e.g. `noc-iq-demo-teams-users`) | Foundry Agent Consumer | `eed3b665-ab3a-47b6-8f48-c9382fb1dad6` | Foundry project | OAuth identity-passthrough for persisted Prompt Agents (`noc-topology-agent`, `noc-comms-agent`, `noc-incident-agent`) — the *calling Teams user's* own grant is what Agent Service checks. |
+| `teamsUsersPrincipalId` (AAD group) | Azure AI Developer | `64702f94-c441-49e6-a78b-ef80e0188fee` | Foundry project | The toolbox **MCP endpoint** (every tool call) — this was the real fix for the "cancel scope" error (§2 below). |
+| `teamsUsersPrincipalId` (AAD group) | **Foundry Project Runtime User** ✅ load-bearing | `142bfaed-a13f-4c2d-bed2-6db62c4a1009` | Foundry project | The **only** role whose `dataActions` include `Microsoft.CognitiveServices/accounts/AIServices/responses/*` — the exact action a direct (non-`agent_reference`) Responses API call hits. |
+| `teamsUsersPrincipalId` (AAD group) | Cognitive Services OpenAI User | `5e0bd9bd-7b93-4f28-af87-19fc36ad61bd` | Foundry project | Generic model-invocation role, kept as belt-and-suspenders. |
+| `teamsUsersPrincipalId` (AAD group) | Cognitive Services User | `a97b65f3-24c7-4388-baec-2e87135dc908` | Foundry project | Generic model-invocation role, kept as belt-and-suspenders. |
 
-## 2. Foundry project RBAC — granted manually (§9c, not Bicep-managed)
+> **Automated this session** — all 5 `teamsUsersPrincipalId` role assignments
+> above are now declared directly in `infra/core/ai/rbac.bicep` (conditional
+> on `!empty(teamsUsersPrincipalId)`); no manual `az role assignment create`
+> is needed for a fresh deploy. See `docs/TROUBLESHOOTING.md` "RBAC
+> automation" entry.
+
+## 2. Foundry project RBAC — background/history (why 4 of the 5 roles above exist)
 
 These apply to the **agentic user identity** (the agent-user, or the AAD
-group it's added to), not the App Service. Discovered by direct
-`az role definition list` inspection of `dataActions` after three roles in a
-row turned out insufficient (`docs/TROUBLESHOOTING.md` "Foundry project RBAC:
-the caller of the Responses API needs its own role").
+group it's added to). Discovered by direct `az role definition list`
+inspection of `dataActions` after three roles in a row turned out
+insufficient (`docs/TROUBLESHOOTING.md` "Foundry project RBAC: the caller of
+the Responses API needs its own role"). Kept here for the historical
+"why" — the actual assignments now live in §1's table above, in Bicep.
 
 | Role | Role ID (if resolved) | Scope | Surface it actually covers |
 |---|---|---|---|
@@ -50,37 +61,50 @@ the caller of the Responses API needs its own role").
 
 > **Cleanup opportunity**: if a future pass reconfirms `Foundry Project
 > Runtime User` alone is sufficient for the Responses API path, the last 3
-> rows can be dropped to keep the RBAC model minimal.
+> rows can be dropped from `rbac.bicep` to keep the RBAC model minimal.
 
-## 3. Fabric — not ARM/Bicep-manageable, granted manually
+## 3. Fabric — not ARM/Bicep-manageable, granted via `scripts/grant_agent_identity_access.py`
 
-Two independent surfaces, both required, neither expressible in Bicep.
+Two independent surfaces, both required, neither expressible in Bicep (Fabric
+workspace `roleAssignments` and Entra `oauth2PermissionGrants` are not ARM
+resource types). Both are now applied by one idempotent script call instead
+of hand-typed `az rest` commands — see `docs/DEPLOYMENT.md` §4b/§4d.
 
 | Grant | Type | Target | Scope | Why |
 |---|---|---|---|---|
 | `DataAgent.Read.All`, `DataAgent.Execute.All` delegated scopes | Tenant-wide Entra admin consent (`POST /oauth2PermissionGrants`, since Agent Identities have no classic app-registration object) | Agent Identity (`clientId`) → Fabric/Power BI service principal (`resourceId`) | Tenant | Without this: `AADSTS65001: consent_required`, tool silently never added to the turn (no error surfaced). |
 | Workspace **Contributor** role | Fabric workspace role assignment (`POST /v1/workspaces/{id}/roleAssignments`) | Agent-user object id | Fabric workspace (`NOCTopologyWorkspace`) | Tenant consent ≠ workspace RBAC — separate check. Without this: valid, correctly-scoped token still gets a Fabric-side authz failure. |
-| Fabric workspace **Viewer** (or higher) | Fabric workspace role assignment | Each Teams user, or an AAD group they belong to | Fabric workspace | Required specifically for `noc-incident-agent` (RTI) — Foundry `Foundry Agent Consumer` project RBAC is **not sufficient on its own**; Eventhouse enforces the calling user's own Fabric permission at query time. |
+| Fabric workspace **Viewer** (or higher) | Fabric workspace role assignment | Each Teams user, or an AAD group they belong to (`TEAMS_USERS_GROUP_ID`) | Fabric workspace | Required specifically for `noc-incident-agent` (RTI) — Foundry `Foundry Agent Consumer` project RBAC is **not sufficient on its own**; Eventhouse enforces the calling user's own Fabric permission at query time. |
 
-## 4. Microsoft Graph — not ARM/Bicep-manageable, granted manually
+## 4. Microsoft Graph — not ARM/Bicep-manageable, granted via `scripts/grant_agent_identity_access.py`
 
 | Grant | Type | Target | Scope | Why |
 |---|---|---|---|---|
 | `Sites.Read.All`, `Mail.Read`, `People.Read.All`, `OnlineMeetingTranscript.Read.All`, `Chat.Read`, `ChannelMessage.Read.All`, `ExternalItem.Read.All` | Tenant-wide Entra admin consent (`POST /oauth2PermissionGrants`) | Agent Identity → Microsoft Graph service principal | Tenant | Work IQ calls Graph server-side on the user's behalf; missing consent surfaces only as the generic "cancel scope" MCP error, never a clean 403 in this app's own traces. |
-| `WorkIQAgent.Ask` delegated permission | Classic app-registration admin consent (`az ad app permission admin-consent`) | Work IQ Entra app registration | Tenant | Required before `create_workiq_toolbox.py`'s connection can be used. |
-| `Mail.Send` (optional, outbound notifications only) | Added to the **same** `oauth2PermissionGrants` scope string as `Mail.Read` above (no new app registration) | Agent Identity → Microsoft Graph service principal | Tenant | Enables `agent/notifications.py`'s persona-broadcast email path (`docs/OUTBOUND_NOTIFICATIONS.md`). Only valid **inside a turn** (needs a `TurnContext` for the OBO exchange) — a true zero-touch send with no prior conversation would need a materially different model: `Mail.Send` as an Application permission on a separate client-credential app registration, not yet built. |
+| `WorkIQAgent.Ask` delegated permission | Classic app-registration admin consent (`az ad app permission admin-consent`) | Work IQ Entra app registration | Tenant | Required before `create_workiq_toolbox.py`'s connection can be used. Not folded into the consolidation script (different principal/app, one-time). |
+| `Mail.Send` (optional, outbound notifications only) | Merged into the **same** `oauth2PermissionGrants` scope string as `Mail.Read` above (no new app registration) — script does a scope-union PATCH, gated by `GRANT_MAIL_SEND=true` | Agent Identity → Microsoft Graph service principal | Tenant | Enables `agent/notifications.py`'s persona-broadcast email path (`docs/OUTBOUND_NOTIFICATIONS.md`). Only valid **inside a turn** (needs a `TurnContext` for the OBO exchange) — a true zero-touch send with no prior conversation would need a materially different model: `Mail.Send` as an Application permission on a separate client-credential app registration, not yet built. |
 | Azure AI Developer | Bicep-equivalent, applied manually per §9c pattern | Work IQ app's service principal | Foundry project | Same pattern as the agentic-user grant above, for the Work IQ app itself. |
 | `McpServers.Mail.All`, `McpServers.Teams.All`, `McpServersMetadata.Read.All` (`customBlueprintPermissions` in `a365.config.json`) | Agent 365 Tools app permission | Agent Identity | Tenant | Applied by `a365 setup all`, not a separate manual step, but still not Bicep-managed. |
+
+> **Irreducible manual step**: `scripts/grant_agent_identity_access.py` needs
+> `AGENT_IDENTITY_OBJECT_ID`/`AGENT_USER_OBJECT_ID` in `.env`, which can only
+> be obtained after `a365 setup all` + a first live Teams turn (no
+> pre-deployment lookup path exists for these ids). It also must be run by a
+> human holding Global Admin / Fabric admin rights — the capability to grant
+> tenant-wide consent is not itself delegable via any script.
 
 ## 5. Cosmos DB — data-plane RBAC (separate from ARM/control-plane RBAC)
 
 Declared in `gateway/infra/core/config/cosmos.bicep` via `readerPrincipals`/
-`writerPrincipals`/`configWriterPrincipals` parameters, but **had to be
-applied manually this session** because Cosmos SQL role assignments are a
-distinct data-plane surface from ARM role assignments — discovered when the
-worker/admin-ui managed identities got `403` despite already having
-whatever ARM roles existed (`docs/TROUBLESHOOTING.md` "Cosmos `403` after
-the identity fixed itself").
+`writerPrincipals`/`configWriterPrincipals` parameters. **Automated this
+session**: `gateway/infra/main.bicep` now auto-`concat()`s the worker and
+admin-ui managed identity principal ids into `writerPrincipals`/
+`configWriterPrincipals` — no manual `az cosmosdb sql role assignment
+create` needed on a fresh deploy. (It previously had to be run by hand
+because `main.bicep` never wired the already-correct `cosmos.bicep` module's
+params to anything — a wiring bug, not a missing capability. See
+`docs/TROUBLESHOOTING.md` "Cosmos `403` after the identity fixed itself" for
+the original discovery, and "RBAC automation" for the fix.)
 
 | Principal | Cosmos built-in role | Role definition GUID | Containers | Notes |
 |---|---|---|---|---|
@@ -88,7 +112,9 @@ the identity fixed itself").
 | Admin UI managed identity | Cosmos DB Built-in Data **Contributor** | `00000000-0000-0000-0000-000000000002` | `config` | Writes consumer quota/throttling config from the admin UI. |
 | (declared, not yet assigned to anyone) | Cosmos DB Built-in Data **Reader** | `00000000-0000-0000-0000-000000000001` | account-wide | For any future read-only consumer (e.g. a reporting identity). |
 
-Applied via: `az cosmosdb sql role assignment create --account-name <cosmos> --resource-group <rg> --scope /dbs/gateway --principal-id <identity-object-id> --role-definition-id <role-guid>`.
+Auto-applied via Bicep now; the equivalent manual command (for reference or
+an existing environment that can't redeploy immediately) is still:
+`az cosmosdb sql role assignment create --account-name <cosmos> --resource-group <rg> --scope /dbs/gateway --principal-id <identity-object-id> --role-definition-id <role-guid>`.
 
 ## 6. Gateway container infra — declared in Bicep (`container-apps.bicep`, `run-ledger.bicep`, `redis.bicep`)
 
@@ -112,6 +138,21 @@ Applied via: `az cosmosdb sql role assignment create --account-name <cosmos> --r
 |---|---|---|---|
 | Human operator's own `az`/`azd` login | Contributor (or a dedicated automation SP, see `docs/DEPLOYMENT.md` §0) | Subscription/RG | `azd up`, `az group delete`, Fabric capacity resume (`az resource invoke-action --action resume`), `create_foundry_agents.py`/`create_eventhouse.py`/etc. — all the provisioning/teardown scripts run as this identity, via `AzureCliCredential`/`AzureDeveloperCliCredential`. |
 | Human operator's Fabric account | Fabric workspace admin/Contributor + tenant Fabric admin | Fabric tenant/capacity | Required to run `create_fabric_ontology.py`, `create_eventhouse.py`, and `delete_fabric_workspace.py` — Fabric workspace creation/deletion needs Fabric-side admin rights independent of any Azure RBAC role. |
+
+## What's still genuinely manual after this session's automation pass
+
+Every ARM-manageable gap found in this chart (§1, §5) is now Bicep-declared.
+The only remaining manual work is inherently non-ARM:
+
+1. Run `scripts/grant_agent_identity_access.py` once per environment, after
+   `a365 setup all` + a first live Teams turn (needed to learn
+   `AGENT_IDENTITY_OBJECT_ID`/`AGENT_USER_OBJECT_ID` — see §3/§4). This
+   replaces what used to be 4 separate hand-typed commands.
+2. The human running that script must already hold Global Admin / Fabric
+   admin rights — granting tenant-wide consent is not itself delegable via
+   any script or Bicep template.
+3. `WorkIQAgent.Ask` admin consent on the Work IQ app registration (§4) —
+   a one-time, different-principal grant, not folded into the script.
 
 ## Key lesson embedded in this chart
 
