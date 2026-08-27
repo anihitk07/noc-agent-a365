@@ -2,7 +2,7 @@
 
 """Outbound, multi-persona incident-lifecycle email notifications.
 
-Answers the Accenture review gap: the agent could *receive* email (see
+Answers the partner review gap: the agent could *receive* email (see
 `agent.py`'s EMAIL_NOTIFICATION handling) but had no path to *originate*
 one. This module is the reference implementation for that outbound path --
 see docs/OUTBOUND_NOTIFICATIONS.md for the full design, permission model,
