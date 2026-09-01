@@ -8,7 +8,8 @@ Usage:
   az login   # once, if not already
   python check_usage.py [--workspace-id GUID] [--days 1]
 
-Defaults: workspace-id = law-aigw-dev-eus2's customerId, days = 1 (matches the
+Defaults: workspace-id and cosmos-endpoint come from the LOG_ANALYTICS_WORKSPACE_ID
+and COSMOS_ENDPOINT environment variables (azd sets both); days = 1 (matches the
 worker's daily budget window). Requires azure-identity, azure-cosmos,
 azure-monitor-query (already in requirements.txt) and network access to Azure.
 """
@@ -24,8 +25,8 @@ from azure.monitor.query import LogsQueryClient, LogsQueryStatus
 from sync import _USAGE_KQL, _shape_usage, PRICING_DOC_ID
 import budget
 
-DEFAULT_WORKSPACE_ID = "56328e58-fdce-43b0-8890-bff106377864"  # law-aigw-dev-eus2
-DEFAULT_COSMOS_ENDPOINT = "https://cosaigwdeveus2n2tjinbhnbln6.documents.azure.com:443/"
+DEFAULT_WORKSPACE_ID = os.environ.get("LOG_ANALYTICS_WORKSPACE_ID", "")
+DEFAULT_COSMOS_ENDPOINT = os.environ.get("COSMOS_ENDPOINT", "")
 
 
 def query_usage(cred, workspace_id: str, days: int) -> dict:
@@ -62,6 +63,9 @@ def main() -> int:
     ap.add_argument("--cosmos-endpoint", default=DEFAULT_COSMOS_ENDPOINT)
     ap.add_argument("--days", type=int, default=1)
     args = ap.parse_args()
+
+    if not args.workspace_id:
+        ap.error("no workspace: set LOG_ANALYTICS_WORKSPACE_ID or pass --workspace-id")
 
     cred = DefaultAzureCredential()
     usage = query_usage(cred, args.workspace_id, args.days)

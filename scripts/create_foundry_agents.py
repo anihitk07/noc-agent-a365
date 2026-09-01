@@ -18,7 +18,7 @@ prior history.
 Required env (from `.env` / `azd env get-values`):
   FOUNDRY_PROJECT_ENDPOINT, AZURE_AI_MODEL_DEPLOYMENT_NAME, AZURE_TENANT_ID
 Optional (defaults match the live connections already set up in
-rg-noc-iq-demo -- see agent/.env.template):
+rg-<env-name> -- see agent/.env.template):
   FOUNDRY_IQ_CONNECTION_NAME (default kb-mcp-connection)
   FABRIC_IQ_CONNECTION_NAME (default fabric-iq-connection)
   WEB_IQ_CONNECTION_NAME (default web-iq-connection)
