@@ -1,3 +1,19 @@
+---
+page_type: sample
+languages:
+- python
+- bicep
+- typescript
+products:
+- azure
+- azure-openai
+- azure-ai-foundry
+- microsoft-fabric
+urlFragment: noc-agent-a365
+name: noc-agent-a365
+description: "A Microsoft Agent Framework (MAF) agent, hosted on Agent 365 (A365) for Teams"
+---
+
 # NOC/NOA IQ Agent — Sydney Fibre-Cut Demo
 
 > ⚠️ **Proof-of-Concept — Not for Production Use**
@@ -34,7 +50,7 @@ steps, and [`docs/OUTBOUND_NOTIFICATIONS.md`](docs/OUTBOUND_NOTIFICATIONS.md)
 for the (optional, additive) agent-initiated multi-persona email broadcast
 capability — separate from the 4 read-only IQ tools above.
 
-## Architecture (deployed Azure estate — `feat/tokenops-gateway`)
+## Architecture (deployed Azure estate)
 
 ![Azure architecture — VNet-injected APIM gateway, Foundry Prompt Agents, run-ledger governance](docs/images/azure-architecture.svg)
 
@@ -45,8 +61,7 @@ Agents (each with its own single-connection Toolbox: `foundry-iq`, `fabric-iq`,
 `config-sync-worker` job that reconciles Log Analytics spend + Cosmos pricing
 into APIM named values. Private endpoints isolate Foundry, Key Vault, Cosmos,
 and ACR inside `snet-private-endpoints`. Full component/edge legend is in the
-diagram itself; a PNG fallback is at
-[`docs/images/azure-architecture.png`](docs/images/azure-architecture.png).
+diagram itself.
 
 ## TokenOps run-scoped governance — sequence diagram
 
@@ -112,3 +127,12 @@ No `.venv`/`node_modules` are checked in — `.gitignore` covers `.venv/`,
 `.azure/`. Run `pip install -r agent/requirements.txt` (and
 `scripts/requirements.txt` for the provisioning scripts) into a local venv
 you create yourself; remove it when done (`rm -rf .venv`).
+
+## Trademarks
+
+This project may contain trademarks or logos for projects, products, or services.
+Authorized use of Microsoft trademarks or logos is subject to and must follow
+[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
+Use of Microsoft trademarks or logos in modified versions of this project must not
+cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or
+logos are subject to those third-party's policies.

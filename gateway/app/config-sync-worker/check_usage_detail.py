@@ -16,6 +16,7 @@ and Cosmos DB Built-in Data Reader on the gateway account.
 """
 import argparse
 import datetime
+import os
 
 from azure.identity import DefaultAzureCredential
 from azure.monitor.query import LogsQueryClient, LogsQueryStatus
@@ -23,7 +24,8 @@ from azure.monitor.query import LogsQueryClient, LogsQueryStatus
 import budget
 from check_usage import read_pricing, DEFAULT_COSMOS_ENDPOINT
 
-DEFAULT_WORKSPACE_ID = "bc8bf4ca-439d-48f9-80dd-78131d30795a"  # logs-z4u5lniaf25kw (orchestrator App Insights)
+# Orchestrator App Insights workspace (azd sets APPLICATIONINSIGHTS_WORKSPACE_ID).
+DEFAULT_WORKSPACE_ID = os.environ.get("APPLICATIONINSIGHTS_WORKSPACE_ID", "")
 
 _KQL = (
     "AppTraces | where Message == \"usage_event\" "
@@ -63,6 +65,9 @@ def main() -> int:
     ap.add_argument("--cosmos-endpoint", default=DEFAULT_COSMOS_ENDPOINT)
     ap.add_argument("--hours", type=int, default=24)
     args = ap.parse_args()
+
+    if not args.workspace_id:
+        ap.error("no workspace: set APPLICATIONINSIGHTS_WORKSPACE_ID or pass --workspace-id")
 
     cred = DefaultAzureCredential()
     events = query_events(cred, args.workspace_id, args.hours)

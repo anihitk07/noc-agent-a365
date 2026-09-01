@@ -99,7 +99,7 @@ Ported from `C:\Flutter\apim-foundry-governance` into `gateway/infra` as a stand
 
 ## Live deployment (post-merge with `feat/foundry-multi-agent`)
 
-Deployed end-to-end to `rg-noc-iq-demo`. Real bugs found and fixed along the way (all
+Deployed end-to-end to `rg-<env-name>`. Real bugs found and fixed along the way (all
 committed on `feat/tokenops-gateway`): a `set-body` JSON-escaping bug, an invalid
 `context.Principal` reference (replaced with `output-token-variable-name` + `Jwt` claims
 lookup), `rewrite-uri`/`set-backend-service` used inside `<on-error>` (not allowed there),
