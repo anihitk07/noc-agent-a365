@@ -1,0 +1,78 @@
+"""Production entrypoint: build real dependencies (DefaultAzureCredential + Azure SDK clients),
+wire the JWKS verifier, and expose `app` for uvicorn (uvicorn bff.main:app)."""
+import logging
+import os
+from pathlib import Path
+
+import httpx
+from azure.cosmos import CosmosClient
+from azure.identity import DefaultAzureCredential
+from azure.mgmt.apimanagement import ApiManagementClient
+from azure.monitor.query import LogsQueryClient
+
+from bff.apim import ApimKeys
+from bff.app import AppDeps, app_factory
+from bff.config import Settings
+from bff.consumerconfig import ConsumerConfigStore
+from bff.consumerregistry import ConsumerRegistryStore
+from bff.deps import build_verifier, get_verifier
+from bff.jobs import JobStarter
+from bff.metrics import MetricsQuery
+from bff.models_pricing import PricingStore
+from bff.runs import RunsQuery
+from bff.store import MappingStore
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+SPA_DIR = Path(__file__).resolve().parent / "static"
+
+
+def _read_model_prices(pricing_store: PricingStore) -> dict:
+    return pricing_store.get().get("models", {})
+
+
+def build_app():
+    settings = Settings.from_env()
+    # ponytail: bare DefaultAzureCredential() fails to resolve the attached user-assigned
+    # identity on this Container App (ManagedIdentityCredential request 400) even though
+    # exactly one identity is attached -- same gap fixed in config-sync-worker/sync.py.
+    # Pass the client id explicitly via the ADMIN_UI_CLIENT_ID env var wired in Bicep.
+    cred = DefaultAzureCredential(managed_identity_client_id=os.environ.get("ADMIN_UI_CLIENT_ID"))
+
+    apim_client = ApiManagementClient(cred, settings.subscription_id)
+    apim = ApimKeys(client=apim_client, subscription_id=settings.subscription_id, resource_group=settings.apim_rg, service_name=settings.apim_name)
+
+    cosmos = CosmosClient(settings.cosmos_endpoint, credential=cred)
+    container = cosmos.get_database_client(settings.cosmos_database).get_container_client(settings.cosmos_map_container)
+    store = MappingStore(container)
+
+    config_container = cosmos.get_database_client(settings.cosmos_database).get_container_client("config")
+    consumerconfig = ConsumerConfigStore(config_container)
+    consumerregistry = ConsumerRegistryStore(config_container)
+    pricing = PricingStore(config_container)
+    model_prices = _read_model_prices(pricing)
+
+    metrics = MetricsQuery(LogsQueryClient(cred), settings.log_analytics_workspace_id)
+    runs = RunsQuery(LogsQueryClient(cred), settings.log_analytics_workspace_id, model_prices)
+    job_starter = JobStarter(cred, httpx.Client(), sub=settings.subscription_id, rg=settings.apim_rg, job=settings.config_sync_job_name)
+
+    deps = AppDeps(
+        settings=settings,
+        apim=apim,
+        store=store,
+        spa_dir=SPA_DIR if SPA_DIR.is_dir() else None,
+        consumerconfig=consumerconfig,
+        metrics=metrics,
+        consumerregistry=consumerregistry,
+        pricing=pricing,
+        model_prices=model_prices,
+        job_starter=job_starter,
+        runs=runs,
+    )
+    app = app_factory(deps)
+    verifier = build_verifier(settings)
+    app.dependency_overrides[get_verifier] = lambda: verifier
+    return app
+
+
+app = build_app()

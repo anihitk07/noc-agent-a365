@@ -21,7 +21,7 @@ the exception message itself.
 (`nocagent`, `admin`), the `noc-iq-demo-teams-users` AAD group, and the
 App Service's own system-assigned managed identity. Also added the
 real Teams users and the App Service identity as Fabric workspace Members
-(`ddf56a0f-9dff-4022-887f-73f5c4795d15`) so Fabric IQ's data agent can
+(`<fabric-workspace-id>`) so Fabric IQ's data agent can
 actually be read once the outer call succeeds. `agent.py`'s
 `_build_turn_tool` forwards the calling user's own OBO token to the
 toolbox (falling back to the service identity only when no OBO token is
@@ -55,8 +55,8 @@ everything in it describes an already-resolved investigation.
 ## Goal (historical -- issue is now resolved, see above)
 
 `noc-agent-a365` (MAF orchestrator over Foundry IQ / Fabric IQ / Web IQ / Work
-IQ, deployed to Azure App Service `app-n2tjinbhnbln6` in RG
-`rg-noc-iq-demo`, surfaced in Teams via A365) was failing on **every single
+IQ, deployed to Azure App Service `app-<token>` in RG
+`rg-<env-name>`, surfaced in Teams via A365) was failing on **every single
 turn** with:
 
 ```
@@ -113,84 +113,7 @@ right before each retry.
    Crash persisted identically. Reverted or leave off, doesn't matter,
    confirmed not the cause.
 
-## Still suspected / not yet tested
 
-1. **`host_agent_server.py`'s aiohttp `run_app(..., handle_signals=True)`**
-   (line ~492 in `create_and_run_host`) — aiohttp installs its own
-   SIGTERM/SIGINT handlers for graceful shutdown when `handle_signals=True`.
-   If Azure App Service's Linux container sends periodic signals (health
-   probes, idle-timeout enforcement, scaling operations) to the process,
-   aiohttp's shutdown sequence could cancel all pending tasks — including
-   the in-flight MCP lifecycle-owner task — from a context anyio sees as
-   "cancelled via a different task's cancel scope." **This was the active
-   thread when the last session got interrupted mid-investigation — test
-   next by setting `handle_signals=False` and redeploying.**
-2. Was mid-read of `agent_framework/_mcp.py`'s `MCPTool` internals
-   (`_ensure_lifecycle_owner` L1124, `_run_lifecycle_owner` L1135,
-   `_lifecycle_owner_task` L530, `_is_lifecycle_owner_task` L1181) on the
-   local machine
-   (`C:\Users\aganguly\AppData\Local\Programs\Python\Python313\Lib\site-packages\agent_framework\_mcp.py`)
-   to understand exactly what could destroy/cancel that owner task from
-   outside — **not yet concluded**.
-3. Environment/runtime differences between the Windows dev machine (where
-   the standalone probe succeeds) and the Linux App Service container
-   (where the live app always fails): event loop implementation
-   differences, DNS/TLS stack behavior, outbound connection
-   keep-alive/idle-timeout handling possibly reset by the platform.
-4. Whether the ~5-6s of sequential token-broker calls (still happening on
-   cache-miss turns even after fix #5 above) is itself normal A365 SDK
-   behavior or a misconfiguration forcing fresh acquisition instead of using
-   MSAL's own token cache.
+> Historical session-planning sections (next steps, environment constraints,
+> local file references) were removed when this repo was prepared for public release.
 
-## Fast next steps (in order)
-
-1. **Test `handle_signals=False`** in `host_agent_server.py`'s `run_app(...)`
-   call — smallest possible change, directly tests the leading unconfirmed
-   hypothesis. Redeploy (`azd deploy`, ~5 min), have user retest in Teams,
-   check App Insights traces for the same signature.
-2. If that doesn't fix it: add a diagnostic log right before
-   `session.initialize()` (or monkeypatch a wrapper) capturing
-   `asyncio.all_tasks()` state / any pending cancellation on the current
-   task, to see directly what's cancelling the owner task, rather than
-   inferring from behavior.
-3. If still unresolved after that: give the user an honest time-boxed
-   verdict — either escalate to Microsoft/agent_framework maintainers with
-   the full evidence trail (this primer + docs/TROUBLESHOOTING.md), or
-   fall back to bypassing `agent_framework.MCPStreamableHTTPTool` entirely
-   and call the toolbox via raw MCP JSON-RPC HTTP calls directly (proven
-   reliable standalone and via direct calls).
-
-## Standing constraints (do not violate)
-
-- **Do not delete any Azure resources** in `rg-noc-iq-demo` — user will
-  explicitly trigger teardown after the demo/E2E passes.
-- All infra is a fresh RG/all-new resources under `anihitk07`'s
-  subscription (`ME-M365CPI48286597-aganguly-1`), region `eastus2`
-  (App Insights/agent traces show `westus3` for the agentic-token-broker
-  region detection — this is a red herring, unrelated to a separate
-  resource region and not yet fully explained but not implicated in the
-  crash by any evidence so far).
-- Commit all `agent.py`/`host_agent_server.py`/scripts/docs fixes once the
-  bug is actually resolved — several real bugs were found and fixed this
-  session already (exit-stack, NameError regression, token caching) but are
-  not yet committed to git.
-- Repo: `C:\Flutter\noc-agent-a365` (local git, not yet pushed to a remote
-  this session).
-
-## Key files
-
-- `agent/agent.py` — MAF orchestrator, `_run_turn`/retry loop (~line 480),
-  `_build_turn_tool` (~line 403), `_exchange_user_token` + new
-  `_token_cache` (~line 673), module docstring has full auth-type-matrix
-  rationale.
-- `agent/host_agent_server.py` — A365/aiohttp host. `create_and_run_host`
-  (~line 76), `run_app(..., handle_signals=True)` (~line 492, next test
-  target), `on_message`/`_typing_loop` (~line 209-280).
-- `agent/token_cache.py` — unrelated pre-existing cache for A365
-  Observability exporter tokens, do not confuse with the new
-  `self._token_cache` in agent.py.
-- `docs/TROUBLESHOOTING.md` — existing history table, needs this session's
-  findings appended once resolved.
-- Third-party (not in repo, read-only reference):
-  `C:\Users\aganguly\AppData\Local\Programs\Python\Python313\Lib\site-packages\agent_framework\_mcp.py`
-  — `MCPTool` class ~L396, lifecycle-owner-task pattern L1124-1273.

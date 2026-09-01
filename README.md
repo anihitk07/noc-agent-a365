@@ -1,3 +1,19 @@
+---
+page_type: sample
+languages:
+- python
+- bicep
+- typescript
+products:
+- azure
+- azure-openai
+- azure-ai-foundry
+- microsoft-fabric
+urlFragment: noc-agent-a365
+name: noc-agent-a365
+description: "A Microsoft Agent Framework (MAF) agent, hosted on Agent 365 (A365) for Teams"
+---
+
 # NOC/NOA IQ Agent — Sydney Fibre-Cut Demo
 
 > ⚠️ **Proof-of-Concept — Not for Production Use**
@@ -33,6 +49,30 @@ runtime turn, including the 5 narrative beats in §3),
 steps, and [`docs/OUTBOUND_NOTIFICATIONS.md`](docs/OUTBOUND_NOTIFICATIONS.md)
 for the (optional, additive) agent-initiated multi-persona email broadcast
 capability — separate from the 4 read-only IQ tools above.
+
+## Architecture (deployed Azure estate)
+
+![Azure architecture — VNet-injected APIM gateway, Foundry Prompt Agents, run-ledger governance](docs/images/azure-architecture.svg)
+
+VNet-injected APIM sits in front of the AI Foundry project's 4 persisted Prompt
+Agents (each with its own single-connection Toolbox: `foundry-iq`, `fabric-iq`,
+`web-iq`, `work-iq`). A Container Apps environment hosts the `run-ledger`
+(backed by Azure Managed Redis), the `ca-adminui` governance UI, and the
+`config-sync-worker` job that reconciles Log Analytics spend + Cosmos pricing
+into APIM named values. Private endpoints isolate Foundry, Key Vault, Cosmos,
+and ACR inside `snet-private-endpoints`. Full component/edge legend is in the
+diagram itself.
+
+## TokenOps run-scoped governance — sequence diagram
+
+![TokenOps mixed-routing sequence diagram — run ledger precall/postcall governance](docs/images/tokenops-sequence.svg)
+
+Shows the mixed-routing path: direct `responses.create` calls from the
+orchestrator to each Prompt Agent, with token usage reported to the run ledger
+via `precall`/`postcall` regardless of credential kind (service credential vs.
+OBO/`UserEntraToken`). Full narrative and all steps are in
+[`docs/SEQUENCE.md`](docs/SEQUENCE.md) §3; PNG fallback at
+[`docs/images/tokenops-sequence.png`](docs/images/tokenops-sequence.png).
 
 ## IQ auth-type matrix (read this before wiring connections)
 
@@ -87,3 +127,12 @@ No `.venv`/`node_modules` are checked in — `.gitignore` covers `.venv/`,
 `.azure/`. Run `pip install -r agent/requirements.txt` (and
 `scripts/requirements.txt` for the provisioning scripts) into a local venv
 you create yourself; remove it when done (`rm -rf .venv`).
+
+## Trademarks
+
+This project may contain trademarks or logos for projects, products, or services.
+Authorized use of Microsoft trademarks or logos is subject to and must follow
+[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
+Use of Microsoft trademarks or logos in modified versions of this project must not
+cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or
+logos are subject to those third-party's policies.

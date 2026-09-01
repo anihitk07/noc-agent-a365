@@ -15,7 +15,7 @@ param principalType string = 'ServicePrincipal'
 @description('Azure AI Search service name the App Service identity needs data-plane read access to (Foundry IQ knowledge base MCP tool).')
 param searchServiceName string = ''
 
-@description('Object ID of the group/user granted OAuth identity-passthrough access to noc-topology-agent/noc-comms-agent (e.g. the noc-iq-demo-teams-users AAD group). Leave empty to skip -- see docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md for why this must be PROJECT scope, not account scope.')
+@description('Object ID of the group/user granted OAuth identity-passthrough access to noc-topology-agent/noc-comms-agent (e.g. the noc-iq-demo-teams-users AAD group). Leave empty to skip -- see docs/PRIMER_MCP_CANCEL_SCOPE_BUG.md for why this must be PROJECT scope, not account scope. For noc-incident-agent, these same Teams users also need separate Fabric-side workspace/Eventhouse read access (Viewer or equivalent) granted in Fabric itself; Foundry Agent Consumer alone does not bypass Fabric RBAC, and this Bicep file cannot manage those Fabric permissions.')
 param teamsUsersPrincipalId string = ''
 
 @description('Principal type of teamsUsersPrincipalId.')

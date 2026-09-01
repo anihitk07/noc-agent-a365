@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "${AZURE_ENV_NAME}"
+    },
+    "location": {
+      "value": "${AZURE_LOCATION}"
+    },
+    "owner": {
+      "value": "${owner}"
+    },
+    "costCenter": {
+      "value": "${costCenter}"
+    },
+    "apimPublisherName": {
+      "value": "${apimPublisherName}"
+    },
+    "apimPublisherEmail": {
+      "value": "${apimPublisherEmail}"
+    },
+    "apimSkuName": {
+      "value": "${apimSkuName=PremiumV2}"
+    },
+    "budgetAlertEmail": {
+      "value": "${budgetAlertEmail}"
+    },
+    "budgetStartDate": {
+      "value": "${budgetStartDate=2026-08-01T00:00:00Z}"
+    },
+    "workerImage": {
+      "value": "${workerImage}"
+    },
+    "adminUiImage": {
+      "value": "${adminUiImage}"
+    },
+    "entraTenantId": {
+      "value": "${entraTenantId}"
+    },
+    "entraApiAudience": {
+      "value": "${entraApiAudience}"
+    },
+    "bffApiAudience": {
+      "value": "${bffApiAudience}"
+    },
+    "spaClientId": {
+      "value": "${spaClientId}"
+    },
+    "adminGroupObjectId": {
+      "value": "${adminGroupObjectId}"
+    },
+    "deleteByDate": {
+      "value": "${deleteByDate}"
+    }
+  }
+}

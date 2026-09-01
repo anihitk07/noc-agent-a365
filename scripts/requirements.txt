@@ -9,6 +9,8 @@ azure-search-documents>=11.6.0b12
 # Fabric IQ (workspace/lakehouse/ontology + OneLake upload)
 microsoft-fabric-api>=0.1.0b1
 azure-storage-file-datalake>=12.16.0
+azure-kusto-data>=5.0.5
+azure-kusto-ingest>=5.0.5
 
 # Shared
 azure-identity>=1.25.3

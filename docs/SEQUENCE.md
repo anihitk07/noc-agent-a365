@@ -36,20 +36,21 @@ sequenceDiagram
     Op->>Az: Portal — add Web IQ connection (CustomKeys/x-apikey) [done via Bicep if key supplied]
     Op->>Az: python scripts/create_workiq_toolbox.py  (WorkIQ connection, authType=UserEntraToken)
     Op->>Az: ARM PUT fabric-iq-connection  (authType=UserEntraToken, see DEPLOYMENT.md Sec4c)
+    Op->>Az: python scripts/create_rti_connection.py  (fabric-rti-connection, authType=UserEntraToken,<br/>target = Fabric Eventhouse MCP endpoint)
     Op->>Az: python scripts/create_foundry_agents.py
-    Az->>Az: For each of 4 IQ connections: resolve connection, project.agents.create_version(<br/>  name, PromptAgentDefinition(model, instructions, tools=[MCPTool(project_connection_id)]))
-    Az-->>Op: noc-knowledge-agent, noc-topology-agent, noc-threatintel-agent,<br/>noc-comms-agent — 4 persisted Prompt Agents, idempotent (re-run is a no-op<br/>unless the definition actually changed)
+    Az->>Az: For each of 5 IQ connections: resolve connection, project.agents.create_version(<br/>  name, PromptAgentDefinition(model, instructions, tools=[MCPTool(project_connection_id)]))
+    Az-->>Op: noc-knowledge-agent, noc-topology-agent, noc-threatintel-agent,<br/>noc-comms-agent, noc-incident-agent — 5 persisted Prompt Agents,<br/>idempotent (re-run is a no-op unless the definition actually changed)
 
     Op->>Az: azd deploy  (pushes agent/ to the App Service)
     Az->>Agent: App Service cold-starts NocAgent.initialize()
-    Agent->>Az: confirm each of the 4 specialist agents exists (project.agents.get(name))
-    Agent->>Agent: build the orchestrator MAF Agent, binding 4 agents-as-tools<br/>(ask_knowledge_agent, ask_topology_agent, ask_threatintel_agent, ask_comms_agent)
+    Agent->>Az: confirm each of the 5 specialist agents exists (project.agents.get(name))
+    Agent->>Agent: build the orchestrator MAF Agent, binding 5 agents-as-tools<br/>(ask_knowledge_agent, ask_topology_agent, ask_threatintel_agent, ask_comms_agent, ask_incident_agent)
     Note over Agent,Az: No shared Toolbox anymore — each specialist agent already holds<br/>its own single MCPTool, created once by create_foundry_agents.py.
 
     Op->>A365: a365 setup all  (mint teammate identity + blueprint permissions)
     A365->>A365: Register app, create agentic user, apply customBlueprintPermissions
     A365-->>Op: agent published to Teams / M365 Copilot (tenant admin consent required)
-    Op->>Az: az role assignment create --role "Foundry Agent Consumer" --scope <project><br/>--assignee-object-id <noc-iq-demo-teams-users group> (infra/core/ai/rbac.bicep<br/>teamsUsersPrincipalId param) — required for Fabric IQ/Work IQ OAuth passthrough
+    Op->>Az: az role assignment create --role "Foundry Agent Consumer" --scope <project><br/>--assignee-object-id <noc-iq-demo-teams-users group> (infra/core/ai/rbac.bicep<br/>teamsUsersPrincipalId param) — required for Fabric IQ/Work IQ/RTI IQ OAuth passthrough
 ```
 
 ## 2. Runtime turn — Teams user asks about the Sydney fibre cut
@@ -65,6 +66,7 @@ sequenceDiagram
     participant TA as noc-topology-agent<br/>(persisted, Fabric IQ)
     participant TI as noc-threatintel-agent<br/>(persisted, Web IQ)
     participant CA as noc-comms-agent<br/>(persisted, Work IQ)
+    participant IA as noc-incident-agent<br/>(persisted, RTI IQ / Eventhouse)
 
     User->>Bot: "What's the blast radius of the SYD-MEL fibre cut?"
     Bot->>A365: POST /api/messages (Bot Framework Activity JSON)
@@ -74,7 +76,7 @@ sequenceDiagram
     A365-->>Orc: user OBO token
     Orc->>Orc: _current_user_token.set(token) — per-turn contextvar,<br/>isolated to this asyncio Task tree
 
-    Orc->>Orc: self._agent.run(history) — orchestrator model call,<br/>4 specialist tool functions bound as tools
+    Orc->>Orc: self._agent.run(history) — orchestrator model call,<br/>5 specialist tool functions bound as tools
     Note over Orc,CA: The ORCHESTRATOR's model decides which specialists to call and how many times.<br/>Each call is a full Prompt Agent turn (its own model + its own MCP tool), not a raw MCP tool call.
 
     par Orchestrator model decides which specialists to call, in whatever order/count it needs
@@ -93,27 +95,169 @@ sequenceDiagram
         Orc->>CA: ask_comms_agent("on-call roster / bridge chatter")
         Orc->>CA: get_openai_client(agent_name="noc-comms-agent") — credential =<br/>_StaticTokenCredential(user OBO token) (UserEntraToken passthrough)
         CA-->>Orc: on-call engineer, active bridge summary
+    and
+        Orc->>IA: ask_incident_agent("alert timeline / optical evidence for the fibre cut")
+        Orc->>IA: get_openai_client(agent_name="noc-incident-agent") — credential =<br/>_StaticTokenCredential(user OBO token) (UserEntraToken passthrough)<br/>to the Fabric Eventhouse MCP endpoint
+        IA-->>Orc: exact Eventhouse evidence from OpticalTelemetry / NetworkAlerts / IncidentEvents
     end
 
     Orc->>Orc: check each specialist's response.output for an oauth_consent_request item<br/>(_extract_oauth_consent_url) — if found, set the _pending_consent contextvar<br/>instead of returning text (see step below)
-    Orc->>Orc: orchestrator model synthesizes ONE response from whatever specialist<br/>results came back — cite each source, in order: blast radius → SLA exposure →<br/>shared-conduit finding → runbook → advisory → on-call
+    Orc->>Orc: orchestrator model synthesizes ONE response from whatever specialist<br/>results came back — cite each source, in order: blast radius → incident evidence →<br/>shared-conduit finding → runbook → advisory → on-call
     Orc-->>A365: response text (or, if _pending_consent was set by any specialist,<br/>an empty string — the consent Adaptive Card is sent directly instead)
     A365-->>Bot: response text
     Bot-->>User: "Blast radius: VPN-ACME-CORP + VPN-BIGBANK ($75k/hr exposure)...<br/>⚠️ Non-obvious: FIBRE-02 shares CONDUIT-SYD-MEL-INLAND...<br/>Runbook: reroute via Brisbane... On-call: ..."
 ```
 
-**Key point this diagram must make clear**: there are **four persisted Foundry
+**Key point this diagram must make clear**: there are **five persisted Foundry
 Prompt Agents**, each with its own single MCP tool baked into its own
 definition, called via **agents-as-tools** from one ephemeral MAF
 orchestrator `Agent`. The `par` block above shows the orchestrator model's
 own tool-selection deciding which (and how many) specialists to invoke;
-`agent.py` still does not iterate over the 4 IQ surfaces or hand-aggregate
+`agent.py` still does not iterate over the 5 IQ surfaces or hand-aggregate
 their results itself — only the granularity of what's being routed to has
 changed, from a raw MCP tool call to a whole persisted-agent turn.
 
-## 3. The 5 narrative beats this sequence must produce
+RTI IQ is the deliberate "evidence" specialist in that set: live Eventhouse
+facts from `OpticalTelemetry`, `NetworkAlerts`, and `IncidentEvents`. Foundry
+IQ stays the "narrative" specialist: written tickets, runbooks, and
+post-mortems. When both are called on the same incident, the orchestrator is
+expected to reconcile them, not blur them together.
 
-A correct end-to-end run must surface all five, each traceable to a real
+## 3. Run-scoped token governance (TokenOps) — mixed routing, not a blanket APIM hop
+
+**Why not simply route all 6 model calls (orchestrator + 5 specialists) through
+APIM?** Two hard blockers, both discovered while wiring this up:
+
+- **OAuth identity passthrough breaks.** `fabric_iq`, `work_iq`, and `rti_iq` authenticate
+  each `responses.create()` call as the *calling Teams user* (a
+  `_StaticTokenCredential` wrapping their OBO token), so Agent Service attributes
+  the stored per-user consent grant correctly. APIM's `authentication-managed-identity`
+  policy substitutes **its own** identity before the call reaches Foundry —
+  fine for the 2 service-identity specialists, but it would silently break
+  consent attribution for these 3.
+- **Persisted-agent request bodies don't fit the gateway's assumptions.**
+  `openai-gateway`/`foundry-gateway`'s policies parse a `model` field and a
+  `messages`/`input` field out of the request body for token estimation and
+  the allowed-model check. A persisted Prompt Agent's model is baked into its
+  *own* definition — the client-side `responses.create(input=question)` call
+  often carries neither a `model` field nor a `messages` array, so those
+  policies' assumptions (now fixed for Responses-API field names, see below)
+  still don't fully describe what this app actually sends per specialist.
+
+**What actually ships**: the orchestrator and all 5 specialists keep calling
+Foundry **directly** (unchanged data path, so consent passthrough keeps
+working for all 5 uniformly). Token governance is achieved by having
+`agent.py` itself call the run ledger's `/v1/precall` and `/v1/postcall`
+directly — the same decision contract (`allow` / `mutate` / `queue` / `halt`)
+APIM's own policies use, just invoked from Python instead of from policy XML,
+using the real `response.usage` each call already returns. Since the run
+ledger's Container App has **internal-only ingress** (unreachable from the
+non-VNet-integrated App Service), these calls go through a thin `/ledger`
+pass-through API added to APIM (`run-ledger-gateway` in `apim.bicep`) — APIM
+is already VNet-injected and can reach it; this is a plain reverse-proxy hop
+with no body inspection, so it doesn't inherit either blocker above.
+
+The deployed `openai-gateway`/`foundry-gateway` APIs (now fixed for
+Responses-API field names: `input`/`max_output_tokens`/`input_tokens`/
+`output_tokens`, with defensive fallback to the old Chat-Completions field
+names) remain live and available for any *other* direct AOAI/Foundry caller
+that does send REST-shaped, model-in-body traffic — they are just not in this
+app's own hot path.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Orc as NocAgent orchestrator (agent.py)
+    participant Ledger as APIM /ledger pass-through<br/>→ Run Ledger (internal Container App)
+    participant KA as noc-knowledge-agent (Foundry IQ)
+    participant TA as noc-topology-agent (Fabric IQ, OBO)
+    participant TI as noc-threatintel-agent (Web IQ)
+    participant CA as noc-comms-agent (Work IQ, OBO)
+    participant IA as noc-incident-agent (RTI IQ / Eventhouse, OBO)
+
+    Note over Orc,Ledger: Once per turn: mint/reuse a run token (POST /v1/runs),<br/>run_id derived deterministically from conversation_id + activity_id
+
+    Orc->>Ledger: POST /v1/precall (run_id, agent=noc-agent, step, model,<br/>est_input_tokens) — orchestrator's own model call
+    Ledger-->>Orc: {action: allow|mutate|queue|halt, reservation_id}
+    alt halt or queue
+        Orc-->>Orc: raise _RunHaltedError → Teams Adaptive Card ("Run paused by policy")
+    else allow / mutate
+        Orc->>Orc: self._agent.run(history) (direct to Foundry, unchanged)
+        Orc->>Ledger: POST /v1/postcall (reservation_id, real usage_details<br/>input_token_count/output_token_count)
+    end
+
+    par For each specialist the orchestrator's model decides to call
+        Orc->>Ledger: POST /v1/precall (run_id, agent=knowledge, step, model=noc-knowledge-agent, est_input_tokens)
+        Ledger-->>Orc: decision
+        Orc->>KA: responses.create(input=question) — service credential, direct to Foundry
+        KA-->>Orc: response (usage.input_tokens/output_tokens)
+        Orc->>Ledger: POST /v1/postcall (real usage)
+    and
+        Orc->>Ledger: POST /v1/precall (run_id, agent=topology, step, model=noc-topology-agent, ...)
+        Ledger-->>Orc: decision
+        Orc->>TA: responses.create(input=question) — _StaticTokenCredential(user OBO token), direct to Foundry
+        TA-->>Orc: response (or oauth_consent_request item — unaffected by any of this)
+        Orc->>Ledger: POST /v1/postcall (real usage, or failed=true on error)
+    and
+        Orc->>Ledger: POST /v1/precall (agent=threatintel, model=noc-threatintel-agent, ...)
+        Orc->>TI: responses.create(input=question) — service credential, direct to Foundry
+        TI-->>Orc: response
+        Orc->>Ledger: POST /v1/postcall (real usage)
+    and
+        Orc->>Ledger: POST /v1/precall (agent=comms, model=noc-comms-agent, ...)
+        Orc->>CA: responses.create(input=question) — _StaticTokenCredential(user OBO token), direct to Foundry
+        CA-->>Orc: response
+        Orc->>Ledger: POST /v1/postcall (real usage, or failed=true on error)
+    and
+        Orc->>Ledger: POST /v1/precall (agent=incident, model=noc-incident-agent, ...)
+        Orc->>IA: responses.create(input=question) — _StaticTokenCredential(user OBO token),<br/>direct to Foundry → direct MCPTool to the Fabric Eventhouse endpoint
+        IA-->>Orc: response
+        Orc->>Ledger: POST /v1/postcall (real usage, or failed=true on error)
+    end
+```
+
+**Answering "how is fabric_iq/work_iq/rti_iq's usage governed if it never goes through
+APIM?"**: identically to `foundry_iq`/`web_iq`, via this direct precall/postcall pair —
+the OAuth-passthrough identity used for the Foundry call is completely
+orthogonal to which channel reports the resulting token usage to the ledger.
+The run ledger enforces the same run-scoped budget/halt/steer decisions either
+way; only the transport of the *governed* call itself (direct vs. through
+APIM) differs, and that choice is driven purely by which of the two blockers
+above applies to that specialist.
+
+**Latency contract, verified against `agent.py` (`_run_ledger_precall` /
+`_run_ledger_postcall`, `_call_specialist`, `process_user_message`)**:
+
+- Both calls are `async def`, made with `httpx.AsyncClient`, and are `await`ed
+  on Python's event loop rather than blocking a thread — so while one
+  specialist's precall/postcall is in flight, every other concurrently
+  running specialist coroutine (and the orchestrator itself) keeps making
+  progress. This is what makes the `par` block above genuinely parallel: the
+  5 precall→call→postcall triplets don't serialize against each other.
+- `precall` is a real, intentional gate: it is awaited **before** the model
+  call and its `allow`/`mutate`/`queue`/`halt` decision can change what
+  happens next (steer down `max_output_tokens`, or raise `_RunHaltedError`) —
+  so it does add its own small latency to that specific call's critical
+  path, by design.
+- `postcall` is "best-effort" **only in its error handling** — on any
+  exception it logs a warning and swallows it (`_run_ledger_postcall`'s
+  docstring: "never raises"), so a down run ledger degrades accounting
+  accuracy, not the turn. It is still `await`ed inline before
+  `_call_specialist`/`process_user_message` returns, so it is not a
+  fire-and-forget `asyncio.create_task` — it is a second small,
+  in-VNet HTTP hop per call (`RUN_LEDGER_CREATE_TIMEOUT_SECONDS`, default
+  2s ceiling, typically far faster).
+- Net effect on what the user actually waits for: negligible. Each Foundry
+  `responses.create()` call this wraps runs tens of seconds; the precall +
+  postcall pair adds at most a couple of fast internal HTTP round-trips
+  around it, and — because the 5 specialists run concurrently — that
+  overhead never stacks up across specialists, only (trivially) within each
+  one's own path.
+
+## 4. The 6 narrative beats this sequence must produce
+
+
+A correct end-to-end run must surface all six, each traceable to a real
 tool call (verified via App Insights traces in the `verify-e2e` step, not
 asserted from the model's unaided knowledge):
 
@@ -126,7 +270,12 @@ asserted from the model's unaided knowledge):
 4. **Non-obvious finding** — `LINK-SYD-MEL-FIBRE-02` (the "backup") shares
    `CONDUIT-SYD-MEL-INLAND` with the cut primary link — fake redundancy
    (Fabric IQ `RIDES_ON` relationship).
-5. **Reroute** — the runbook-prescribed mitigation is a reroute via Brisbane
+5. **Evidence beats narrative when they diverge** — RTI IQ's Eventhouse query
+   can show the first optical anomaly earlier than the written incident ticket,
+   for example because an intermediate alert was suppressed by an alert-storm
+   rule (`OpticalTelemetry` + `NetworkAlerts` + `IncidentEvents` vs. Foundry IQ
+   ticket narrative).
+6. **Reroute** — the runbook-prescribed mitigation is a reroute via Brisbane
    (Foundry IQ knowledge base).
 
 ## 5. Merged end-to-end: the live Teams turn + TokenOps governance + the async gateway loop
@@ -181,6 +330,16 @@ Steps 13-27 (5 precall→call→postcall triplets) run in parallel — governed
 identically whether the specialist authenticates as the service or via OBO
 passthrough; only the transport of the *governed* call differs (direct to
 Foundry either way), never the ledger accounting.
+
+All precall/postcall calls (steps 7, 11, 13, 15, 16, 18, 19, 21, 22, 24, 25,
+27) are `async`/`await`ed `httpx` calls, never blocking threads — so they
+don't serialize the 5 parallel specialist paths against each other. `precall`
+is an intentional gate awaited before its model call (it can steer/halt that
+call); `postcall` is best-effort only in its *error handling* (never fails
+the turn on a ledger outage), but is still awaited inline as a fast in-VNet
+hop (≤2s timeout, usually much faster) before the specialist returns — a
+rounding error next to the tens-of-seconds Foundry call it wraps. See §3's
+"Latency contract" note for the full detail.
 
 ### Part 2 — asynchronous, out-of-band (not tied to any single Teams turn)
 

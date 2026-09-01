@@ -26,7 +26,10 @@ def _check(label, condition):
 
 
 def main():
-    _check("all 4 IQ surfaces are present", set(SPECIALIST_AGENTS) == {"foundry_iq", "fabric_iq", "web_iq", "work_iq"})
+    _check(
+        "all 5 IQ surfaces are present",
+        set(SPECIALIST_AGENTS) == {"foundry_iq", "fabric_iq", "web_iq", "work_iq", "rti_iq"},
+    )
 
     knowledge_agent, knowledge_needs_user = SPECIALIST_AGENTS["foundry_iq"]
     _check("foundry_iq -> noc-knowledge-agent", knowledge_agent == "noc-knowledge-agent")
@@ -44,7 +47,11 @@ def main():
     _check("work_iq -> noc-comms-agent", comms_agent == "noc-comms-agent")
     _check("work_iq requires the calling user's OAuth identity (UserEntraToken)", comms_needs_user is True)
 
-    print("PASS: test_specialist_routing.py self-check passed (10 cases)")
+    incident_agent, incident_needs_user = SPECIALIST_AGENTS["rti_iq"]
+    _check("rti_iq -> noc-incident-agent", incident_agent == "noc-incident-agent")
+    _check("rti_iq requires the calling user's OAuth identity (UserEntraToken)", incident_needs_user is True)
+
+    print("PASS: test_specialist_routing.py self-check passed (12 cases)")
 
 
 if __name__ == "__main__":
