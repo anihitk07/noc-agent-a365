@@ -1,8 +1,8 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-pyjwt[crypto]==2.10.1
+pyjwt[crypto]==2.13.0
 httpx==0.28.1
 azure-identity==1.19.0
 azure-keyvault-secrets==4.11.1
 redis==7.3.0
-pytest==8.4.2
+pytest==9.0.3
