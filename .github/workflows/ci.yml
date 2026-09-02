@@ -37,7 +37,8 @@ jobs:
           cache: pip
           cache-dependency-path: gateway/app/run-ledger/requirements.txt
       - run: pip install -r requirements.txt
-      - run: pytest tests -v
+      # ponytail: `python -m pytest` (not bare `pytest`) puts CWD on sys.path so `run_ledger` imports
+      - run: python -m pytest tests -v
 
 # ponytail: covers only the two suites proven green locally (spa `tsc -b && vite build`,
 # run-ledger's 28 tests). admin-ui/bff and config-sync-worker have tests/ dirs but no
