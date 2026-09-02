@@ -5,4 +5,4 @@ httpx==0.28.1
 azure-identity==1.19.0
 azure-keyvault-secrets==4.11.1
 redis==7.3.0
-pytest==8.4.2
+pytest==9.0.3
